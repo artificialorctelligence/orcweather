@@ -7,8 +7,11 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import 'config.dart';
+import 'idot.dart';
 import 'librewxr.dart';
 import 'nws.dart';
+import 'road_risk.dart';
+import 'wzdx.dart';
 
 void main() => runApp(const OrcWeatherApp());
 
@@ -35,17 +38,24 @@ class _MapScreenState extends State<MapScreen> {
   final _client = http.Client();
   late final _wxr = LibreWxr(_client);
   late final _nws = Nws(_client);
+  late final _wzdx = Wzdx(_client);
+  late final _idot = Idot(_client);
 
   LatLng? _position;
   RadarFrame? _radar;
   List<WeatherAlert> _alerts = const [];
   Conditions? _conditions;
+  List<WorkZone> _workZones = const [];
+  List<RoadCondition> _roads = const [];
+  String? _roadsState; // state the road layers were last fetched for
+  DateTime? _roadsAt;
   String? _error;
   StreamSubscription<Position>? _positionSub;
   Timer? _refresh;
   bool _followPosition = true;
 
   static const _refreshEvery = Duration(minutes: 5);
+  static const _roadsEvery = Duration(minutes: 30);
   static const _radiusMeters = radiusMiles * metersPerMile;
 
   @override
@@ -102,9 +112,22 @@ class _MapScreenState extends State<MapScreen> {
         _conditions = results[2] as Conditions;
         _error = null;
       });
+      await _refreshRoads(here, _conditions?.state);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
+  }
+
+  /// Road layers are statewide downloads (up to ~10 MB): only on state change or every 30 min.
+  Future<void> _refreshRoads(LatLng here, String? state) async {
+    if (state == null) return;
+    final stale = _roadsAt == null || DateTime.now().difference(_roadsAt!) > _roadsEvery;
+    if (state == _roadsState && !stale) return;
+    _roadsState = state;
+    _roadsAt = DateTime.now();
+    final zones = await _wzdx.near(here, _radiusMeters, state);
+    final roads = state == 'IL' ? await _idot.near(here, _radiusMeters) : const <RoadCondition>[];
+    if (mounted) setState(() { _workZones = zones; _roads = roads; });
   }
 
   /// Zoom so the 50-mile circle fills the short side of the screen.
@@ -154,6 +177,14 @@ class _MapScreenState extends State<MapScreen> {
                       borderStrokeWidth: 2,
                     ),
               ]),
+              PolylineLayer(polylines: [
+                for (final r in _roads)
+                  if (!r.isClear)
+                    for (final line in r.lines)
+                      Polyline(points: line, color: _conditionColor(r.condition), strokeWidth: 5),
+                for (final z in _workZones)
+                  Polyline(points: z.points, color: Colors.orange, strokeWidth: 3),
+              ]),
               if (here != null) ...[
                 CircleLayer(circles: [
                   CircleMarker(
@@ -175,7 +206,14 @@ class _MapScreenState extends State<MapScreen> {
           SafeArea(
             child: Align(
               alignment: Alignment.topLeft,
-              child: _ConditionsPanel(conditions: _conditions, alerts: _alerts, error: _error),
+              child: _ConditionsPanel(
+                conditions: _conditions,
+                alerts: _alerts,
+                error: _error,
+                roadRisk: roadRisk(_conditions, _alerts),
+                reportedBad: _roads.where((r) => !r.isClear).length,
+                workZones: _workZones.length,
+              ),
             ),
           ),
           SafeArea(
@@ -209,6 +247,13 @@ Color _severityColor(String severity) => switch (severity) {
       _ => Colors.yellowAccent,
     };
 
+Color _conditionColor(String condition) => switch (condition) {
+      'Covered with ice or snow' => Colors.deepPurpleAccent,
+      'Mostly Covered with ice or snow' => Colors.redAccent,
+      'Partly Covered with ice or snow' => Colors.amberAccent,
+      _ => Colors.transparent,
+    };
+
 class _ZoomButton extends StatelessWidget {
   const _ZoomButton({required this.icon, required this.onPressed});
   final IconData icon;
@@ -223,10 +268,20 @@ class _ZoomButton extends StatelessWidget {
 }
 
 class _ConditionsPanel extends StatelessWidget {
-  const _ConditionsPanel({required this.conditions, required this.alerts, required this.error});
+  const _ConditionsPanel({
+    required this.conditions,
+    required this.alerts,
+    required this.error,
+    required this.roadRisk,
+    required this.reportedBad,
+    required this.workZones,
+  });
   final Conditions? conditions;
   final List<WeatherAlert> alerts;
   final String? error;
+  final String? roadRisk;
+  final int reportedBad; // IDOT sections not "Clear" within range
+  final int workZones;
 
   @override
   Widget build(BuildContext context) {
@@ -255,6 +310,15 @@ class _ConditionsPanel extends StatelessWidget {
               Text('${alerts.length} alert${alerts.length == 1 ? '' : 's'} within ${radiusMiles.round()} mi',
                   style: text.labelLarge?.copyWith(color: _severityColor(worst.severity))),
               Text(worst.title, style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+            if (reportedBad > 0 || roadRisk != null || workZones > 0) ...[
+              const SizedBox(height: 6),
+              if (reportedBad > 0)
+                Text('Roads: $reportedBad section${reportedBad == 1 ? '' : 's'} reported snow/ice (IDOT)',
+                    style: text.bodyMedium?.copyWith(color: Colors.redAccent)),
+              if (roadRisk != null)
+                Text('Roads: $roadRisk — estimate', style: text.bodyMedium?.copyWith(color: Colors.amberAccent)),
+              if (workZones > 0) Text('$workZones work zone${workZones == 1 ? '' : 's'} within ${radiusMiles.round()} mi', style: text.bodySmall),
             ],
             if (c != null && error != null) Text(error!, style: text.bodySmall?.copyWith(color: Colors.orangeAccent)),
           ],

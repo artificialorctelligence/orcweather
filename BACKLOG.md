@@ -54,3 +54,12 @@ states, GeoJSON). Free national options are WZDx work zones (not surface state) 
 Consequence: the feature cannot be built as "reported conditions everywhere" without paying.
 Decision needed: which state(s) the user drives in (→ 511), or Road511, or start with inferred
 risk + WZDx.
+
+**Update 2026-09-14:** built three of the four: inferred road risk (`lib/road_risk.dart`),
+WZDx work zones chosen by the state NWS returns for the GPS position (`lib/wzdx.dart`, 26 of
+43 registry feeds work keyless — neither Illinois feed does), and IDOT reported winter
+conditions for Illinois (`lib/idot.dart`, free ArcGIS service, server-side radius query).
+Still open: reported conditions outside Illinois (look for each state DOT's ArcGIS Open Data
+portal first, then 511 API, then Road511), and Illinois work zones (IDOT/Tollway WZDx keys —
+request them).
+

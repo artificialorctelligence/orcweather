@@ -41,11 +41,36 @@ dependency on a small vendor is the risk.
 ## 3. WZDx — free federal work-zone registry (work zones only)
 
 USDOT's Work Zone Data Exchange feed registry
-(`https://datahub.transportation.gov/resource/69qe-yiui.json`) listed **43 active feeds** across
-~36 states on 2026-09-14, each a GeoJSON URL (some with embedded tokens, `needapikey` mostly
-false), update frequency per feed (e.g. Oklahoma DOT, 1 min). Standardized schema (WZDx v4).
-Covers construction/work zones and some incidents — **not** surface conditions. Free and
-uniform; worth adding as a layer on its own.
+(`https://datahub.transportation.gov/resource/69qe-yiui.json`, Socrata, no key) listed **43
+feeds** on 2026-09-14. Probed every one that day with a distinct `User-Agent`: **26 fetchable
+without a key** (AZ, DE, HI, ID, IN, IA, KS, KY, LA, MD, MN, MS, MO, NH/VT/ME, NJ, NY, NC, ND,
+OK, TX-Austin, UT, WA, WI, plus Québec and two non-state feeds); **12 need an API key**
+(`needapikey: true` — CA, CO, IL ×2, MA, MI, OH, OR, PA, TX statewide, VA, NPS); the rest are
+broken (bad TLS, 503, no URL, Florida serves undeclared gzip). Registry `state` values are
+free-text and inconsistently cased (`"Illinois"` and `"illinois"`, one row is `"New Hampshire,
+Vermont, Maine"`) — match case-insensitively by substring. Oklahoma returns 403 without a
+User-Agent. Feeds are **statewide, unfiltered**: Wisconsin 10 MB and North Carolina 11 MB
+uncompressed with no gzip; New York 527 KB gzipped for 6,917 features. Schema: GeoJSON
+`FeatureCollection`, `road_event_feed_info.version` (4.0–4.2 seen), features with
+`geometry` LineString or MultiPoint and `properties.core_details.{event_type, road_names[],
+direction, description}`. Covers construction/work zones — **not** surface conditions.
+
+State-from-GPS is free: NWS `/points/{lat},{lon}` already returns
+`properties.relativeLocation.properties.state` (`"IL"` for Peoria, confirmed 2026-09-14).
+
+## 3b. Illinois specifically — IDOT reported winter road conditions, free, keyless
+
+`https://services2.arcgis.com/aIrBD8yn1TDTEXoz/arcgis/rest/services/IL_DOT_Winter_Road_Conditions_/FeatureServer/2`
+(layer `WrcMaintenanceSectionRoutes`, polyline, 410 features statewide, `maxRecordCount` 2000,
+data last edited 2026-04-15 — i.e. the previous winter season). Field `Condition` has a coded
+domain of exactly four values: `Clear`, `Partly Covered with ice or snow`, `Mostly Covered with
+ice or snow`, `Covered with ice or snow`; plus `WrcMntSectionName`, `COUNTY_NAM`, `DIST`. The
+ArcGIS `query` endpoint does the radius filter server-side
+(`geometry=lon,lat&geometryType=esriGeometryPoint&inSR=4326&distance=80467&units=esriSRUnit_Meter&outSR=4326&f=geojson`)
+and returns `MultiLineString` GeoJSON. Confirmed live: three sections within 50 mi of Peoria.
+Listed on `gis-idot.opendata.arcgis.com` as "IL DOT Winter Road Conditions"; the public map is
+gettingaroundillinois.com. This is the pattern to look for in other states: **a DOT ArcGIS
+Open Data portal** often exposes what the 511 site draws, keyless.
 
 ## 4. Infer road risk from weather already in hand — free, national, honest if labelled
 
@@ -69,5 +94,7 @@ to third parties as data); scraping 511 websites (terms).
 - Road511: `https://road511.com/`
 - WZDx registry: `https://datahub.transportation.gov/resource/69qe-yiui.json`; spec `https://github.com/usdot-jpo-ode/wzdx`
 - Iowa DOT open data: `https://data.iowadot.gov/` (Iowa 511 Winter Road Conditions)
+- IDOT winter road conditions: `https://gis-idot.opendata.arcgis.com/datasets/il-dot-winter-road-conditions/about`, service `https://services2.arcgis.com/aIrBD8yn1TDTEXoz/arcgis/rest/services/IL_DOT_Winter_Road_Conditions_/FeatureServer/2?f=json`
+- NWS `/points` state field: `https://api.weather.gov/points/40.6936,-89.5890`
 - Paid model-derived: `https://xweather.com/weather-api/road-weather`, `https://openweathermap.org/api/road-risk`
 - Data.gov tag: `https://catalog.data.gov/dataset/?tags=road-conditions`

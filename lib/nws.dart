@@ -14,6 +14,7 @@ class Conditions {
     required this.shortForecast,
     required this.precipChance,
     required this.humidity,
+    this.state,
   });
   final int temperatureF;
   final String windSpeed; // NWS sends a string, e.g. "17 mph"
@@ -21,8 +22,9 @@ class Conditions {
   final String shortForecast;
   final int? precipChance;
   final int? humidity;
+  final String? state; // two-letter, from /points relativeLocation
 
-  static Conditions parse(String hourlyBody) {
+  static Conditions parse(String hourlyBody, {String? state}) {
     final p = ((jsonDecode(hourlyBody) as Map)['properties']['periods'] as List).first as Map;
     return Conditions(
       temperatureF: p['temperature'] as int,
@@ -31,6 +33,7 @@ class Conditions {
       shortForecast: p['shortForecast'] as String,
       precipChance: (p['probabilityOfPrecipitation'] as Map?)?['value'] as int?,
       humidity: (p['relativeHumidity'] as Map?)?['value'] as int?,
+      state: state,
     );
   }
 }
@@ -51,7 +54,9 @@ class Nws {
     final lat = at.latitude.toStringAsFixed(4);
     final lon = at.longitude.toStringAsFixed(4);
     final points = jsonDecode(await _get(Uri.parse('$host/points/$lat,$lon'))) as Map;
-    final hourlyUrl = points['properties']['forecastHourly'] as String;
-    return Conditions.parse(await _get(Uri.parse(hourlyUrl)));
+    final props = points['properties'] as Map;
+    final hourlyUrl = props['forecastHourly'] as String;
+    final state = (props['relativeLocation'] as Map?)?['properties']?['state'] as String?;
+    return Conditions.parse(await _get(Uri.parse(hourlyUrl)), state: state);
   }
 }

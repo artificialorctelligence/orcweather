@@ -16,5 +16,12 @@ const librewxrAttribution = 'Weather data via LibreWXR (librewxr.net)';
 
 const nwsHost = 'https://api.weather.gov';
 
+// USDOT Work Zone Data Exchange feed registry (Socrata JSON, no key).
+const wzdxRegistryUrl = 'https://datahub.transportation.gov/resource/69qe-yiui.json?\$limit=500';
+
 const radiusMiles = 50.0;
 const metersPerMile = 1609.344;
+
+// Illinois DOT reported winter road conditions (ArcGIS FeatureServer layer, no key).
+const idotWinterRoadsUrl =
+    'https://services2.arcgis.com/aIrBD8yn1TDTEXoz/arcgis/rest/services/IL_DOT_Winter_Road_Conditions_/FeatureServer/2';
