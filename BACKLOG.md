@@ -63,3 +63,18 @@ Still open: reported conditions outside Illinois (look for each state DOT's ArcG
 portal first, then 511 API, then Road511), and Illinois work zones (IDOT/Tollway WZDx keys —
 request them).
 
+## #7: Simple audio controls for whatever app is playing (Spotify, Audible, …)
+
+Requested 2026-09-14: play/pause/skip buttons on the map screen so the driver never has to
+leave orcweather to control the podcast or music app already playing. Consequence of not
+having it: the app is not a "leave it on the dash" app — every audio touch means switching apps.
+
+Not researched yet; from memory, to be verified under currency-discipline before building:
+Android can send media key events to the active media session with no special permission
+(`AudioManager.dispatchMediaKeyEvent` with `KEYCODE_MEDIA_PLAY_PAUSE` / `_NEXT` / `_PREVIOUS`);
+showing what is playing (title, app) needs `MediaSessionManager.getActiveSessions`, which
+requires the notification-listener permission the user grants in Settings. iOS has no public
+API to control another app's playback — `MPMusicPlayerController.systemMusicPlayer` reaches
+only Apple Music — so the iPhone version likely cannot do this at all, and the writeup must say
+so rather than promise it. Either way it is a small platform-channel plugin in
+`android/app/src/main/kotlin/`, no Dart package needed unless one exists and is current.
