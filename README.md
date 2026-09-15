@@ -10,5 +10,7 @@ flutter analyze && flutter test
 flutter run            # on whatever `flutter devices` lists
 ```
 
-Endpoints and the swappable base-map URL live in `lib/config.dart`. Research on LibreWXR, OSM,
-Android Auto and CarPlay (written for orclab) is in `docs/orclab-research/`.
+Endpoints and the swappable base-map URL live in `lib/config.dart`. The research behind each
+source (LibreWXR, NWS, OSM, WZDx, IDOT, Android Auto, CarPlay) was written as orclab background
+skills and moved there on 2026-09-14: `orclab/skills/{source-librewxr,source-road-conditions,
+map-openstreetmap,car-android-auto,car-carplay}`.
