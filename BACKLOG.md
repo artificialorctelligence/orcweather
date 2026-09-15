@@ -34,8 +34,23 @@ Apple does not have a weather category and only navigation apps may draw the map
 Activity for an active warning via `home_widget`, built in Xcode (Codemagic per stack-flutter).
 Consequence: no CarPlay work is possible from this Linux machine alone. Not started.
 
+**Update 2026-09-14:** verified against Apple's CarPlay App Programming Guide (2026-06-08).
+CARROT Weather, MyRadar and Storm Radar are on CarPlay because they ship turn-by-turn
+navigation and hold the navigation entitlement; that is the only route to a radar map on the
+car screen. Widget + Live Activity remains the entitlement-free path.
+
 ## #5: Linux desktop toolchain missing on the dev machine
 
 `flutter doctor` 2026-09-14: clang++, CMake and ninja absent, so `flutter build linux` cannot run
 here. Only matters when the desktop milestone starts; `sudo apt install clang cmake ninja-build
 libgtk-3-dev` fixes it. Android and tests are unaffected.
+
+## #6: Road conditions: source undecided, no free national feed
+
+Requested 2026-09-14. Research (docs/orclab-research/source-road-conditions): reported surface
+conditions come only from per-state 511 APIs (free, heterogeneous) or Road511 ($29/mo, all
+states, GeoJSON). Free national options are WZDx work zones (not surface state) and inferring
+"road risk" from NWS temperature/precip + winter/fog alerts the app already fetches.
+Consequence: the feature cannot be built as "reported conditions everywhere" without paying.
+Decision needed: which state(s) the user drives in (→ 511), or Road511, or start with inferred
+risk + WZDx.
