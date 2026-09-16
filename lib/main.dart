@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'config.dart';
@@ -13,6 +14,7 @@ import 'idot.dart';
 import 'librewxr.dart';
 import 'nws.dart';
 import 'road_risk.dart';
+import 'settings.dart';
 import 'wzdx.dart';
 
 void main() => runApp(const OrcWeatherApp());
@@ -42,6 +44,7 @@ class _MapScreenState extends State<MapScreen> {
   late final _nws = Nws(_client);
   late final _wzdx = Wzdx(_client);
   late final _idot = Idot(_client);
+  final _settings = Settings(SharedPreferencesAsync());
 
   LatLng? _position;
   double _headingDeg = 0; // course over ground from GPS; meaningful only while moving
@@ -64,6 +67,8 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _settings.addListener(() => setState(() {}));
+    _settings.load();
     _startLocation();
     _refresh = Timer.periodic(_refreshEvery, (_) => _refreshWeather());
   }
@@ -73,6 +78,7 @@ class _MapScreenState extends State<MapScreen> {
     _positionSub?.cancel();
     _refresh?.cancel();
     _client.close();
+    _settings.dispose();
     super.dispose();
   }
 
@@ -168,7 +174,12 @@ class _MapScreenState extends State<MapScreen> {
               },
             ),
             children: [
-              TileLayer(urlTemplate: baseTileUrl, userAgentPackageName: applicationId),
+              ColorFiltered(
+                colorFilter: _settings.darkMap(MediaQuery.platformBrightnessOf(context))
+                    ? const ColorFilter.matrix(_darkTiles)
+                    : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+                child: TileLayer(urlTemplate: baseTileUrl, userAgentPackageName: applicationId),
+              ),
               if (_radar != null)
                 Opacity(
                   opacity: 0.6,
@@ -216,7 +227,7 @@ class _MapScreenState extends State<MapScreen> {
                 ]),
               ],
               RichAttributionWidget(
-                alignment: AttributionAlignment.bottomLeft,
+                alignment: AttributionAlignment.bottomRight,
                 popupInitialDisplayDuration: const Duration(seconds: 5),
                 attributions: [
                   TextSourceAttribution(baseAttribution, onTap: () => launchUrl(Uri.parse('https://openstreetmap.org/copyright'))),
@@ -231,6 +242,19 @@ class _MapScreenState extends State<MapScreen> {
           ),
           SafeArea(
             child: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 44, bottom: 4),
+                child: IconButton.filledTonal(
+                  tooltip: 'Settings',
+                  icon: const Icon(Icons.settings),
+                  onPressed: () => showDialog<void>(context: context, builder: (_) => _SettingsDialog(settings: _settings)),
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Align(
               alignment: Alignment.topRight,
               child: Padding(
                 padding: const EdgeInsets.all(8),
@@ -241,6 +265,7 @@ class _MapScreenState extends State<MapScreen> {
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 300),
                       child: _ConditionsPanel(
+                        settings: _settings,
                         conditions: _conditions,
                         alerts: _alerts,
                         error: _error,
@@ -295,6 +320,7 @@ class _ZoomButton extends StatelessWidget {
 
 class _ConditionsPanel extends StatefulWidget {
   const _ConditionsPanel({
+    required this.settings,
     required this.conditions,
     required this.alerts,
     required this.error,
@@ -302,6 +328,7 @@ class _ConditionsPanel extends StatefulWidget {
     required this.reportedBad,
     required this.workZones,
   });
+  final Settings settings;
   final Conditions? conditions;
   final List<WeatherAlert> alerts;
   final String? error;
@@ -344,7 +371,7 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
   Widget _compact(Conditions c, WeatherAlert? worst, bool roadsBad, TextTheme text) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _chip(_skyIcon(c.shortForecast), '${c.temperatureF}°', text),
+          _chip(_skyIcon(c.shortForecast), widget.settings.formatTemp(c.temperatureF), text),
           _chip(Icons.air, '${c.windDirection} ${c.windSpeed.replaceAll(' mph', '')}', text),
           if ((c.precipChance ?? 0) > 0) _chip(Icons.umbrella, '${c.precipChance}%', text),
           if (worst != null) _chip(Icons.warning_amber, '${widget.alerts.length}', text, color: _severityColor(worst.severity)),
@@ -368,7 +395,7 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('${c.temperatureF}°F  ${c.shortForecast}', style: text.headlineSmall),
+        Text('${widget.settings.formatTemp(c.temperatureF)}  ${c.shortForecast}', style: text.headlineSmall),
         Text('Wind ${c.windDirection} ${c.windSpeed}'
             '${c.precipChance != null ? '  ·  Precip ${c.precipChance}%' : ''}'
             '${c.humidity != null ? '  ·  RH ${c.humidity}%' : ''}', style: text.bodyLarge),
@@ -394,6 +421,55 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
   }
 
   static int _rank(String s) => const {'Minor': 0, 'Moderate': 1, 'Severe': 2, 'Extreme': 3}[s] ?? 0;
+}
+
+/// Inverted grayscale: dark ground, light roads, no orange water. Base tiles only.
+const _darkTiles = <double>[
+  -0.2126, -0.7152, -0.0722, 0, 255,
+  -0.2126, -0.7152, -0.0722, 0, 255,
+  -0.2126, -0.7152, -0.0722, 0, 255,
+  0, 0, 0, 1, 0,
+];
+
+class _SettingsDialog extends StatelessWidget {
+  const _SettingsDialog({required this.settings});
+  final Settings settings;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: settings,
+        builder: (context, _) => AlertDialog(
+          title: const Text('Settings'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Temperature scale'),
+              const SizedBox(height: 6),
+              SegmentedButton<TempUnit>(
+                segments: const [ButtonSegment(value: TempUnit.f, label: Text('°F')), ButtonSegment(value: TempUnit.c, label: Text('°C'))],
+                selected: {settings.tempUnit},
+                onSelectionChanged: (s) => settings.setTempUnit(s.first),
+              ),
+              const SizedBox(height: 18),
+              const Text('Map theme'),
+              const SizedBox(height: 6),
+              SegmentedButton<MapTheme>(
+                segments: const [
+                  ButtonSegment(value: MapTheme.light, label: Text('Light')),
+                  ButtonSegment(value: MapTheme.dark, label: Text('Dark')),
+                  ButtonSegment(value: MapTheme.auto, label: Text('Auto')),
+                ],
+                selected: {settings.mapTheme},
+                onSelectionChanged: (s) => settings.setMapTheme(s.first),
+              ),
+              const SizedBox(height: 6),
+              Text('Auto follows the phone\'s dark mode.', style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],
+        ),
+      );
 }
 
 IconData _skyIcon(String forecast) {
