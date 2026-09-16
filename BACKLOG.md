@@ -94,3 +94,15 @@ alert check moved into that service's tick, and a local notification (`flutter_l
 per stack-flutter) when a warning polygon newly contains the position. iOS: "Always" location
 plus background modes, reviewed by Apple. Battery and Play review are the costs; do it after the
 foreground app is solid.
+
+## #9: Radar animation (past + nowcast) on the phone, never while driving
+
+Decided 2026-09-15: animate the LibreWXR frame list (12 past + 6 nowcast, 10 min apart, already
+parsed in `RadarFrames`) behind a play button that is off by default, so a passenger can scrub
+the loop and the default driving view stays a still frame. Not available while driving — same
+reasoning as CarPlay/Android Auto's rules and MyRadar's "animation restricted for essential
+safety compliance": a looping radar in peripheral vision is driver distraction. Gate on the
+GPS speed the app already tracks (`_moving`), plus never on any car screen. Implementation is a
+timer swapping the radar `TileLayer` urlTemplate through `past + nowcast`; prefetching the next
+frame's tiles keeps the loop smooth. Consequence of not doing it: no storm-motion cue on the
+phone; the still frame plus alerts remain.
