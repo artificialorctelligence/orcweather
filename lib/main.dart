@@ -65,7 +65,7 @@ class _MapScreenState extends State<MapScreen> {
   Timer? _refresh;
   bool _followPosition = true;
 
-  static const _refreshEvery = Duration(minutes: 5);
+  static const _refreshEvery = Duration(minutes: 2); // LibreWXR frames are 10 min apart; index is a tiny JSON
   static const _roadsEvery = Duration(minutes: 30);
   static const _radiusMeters = radiusMiles * metersPerMile;
 
