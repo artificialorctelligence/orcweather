@@ -58,6 +58,7 @@ class _MapScreenState extends State<MapScreen> {
   Timer? _zoomBadgeTimer;
   String? _zoomBadge; // shown for a moment after the zoom changes
   double _lastGestureZoom = 0;
+  double? _zoomAtGestureStart;
   bool _showAttribution = true; // OSMF guideline: visible at first, collapses to (i) after 5 s
   RadarFrame? _radar;
   List<WeatherAlert> _alerts = const [];
@@ -224,7 +225,9 @@ class _MapScreenState extends State<MapScreen> {
             options: MapOptions(
               initialCenter: here ?? const LatLng(39.5, -98.35),
               initialZoom: here == null ? 4 : 8,
-              interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate & ~InteractiveFlag.doubleTapZoom & ~InteractiveFlag.doubleTapDragZoom,
+              ),
               onPositionChanged: (camera, hasGesture) {
                 if (hasGesture && (camera.zoom - _lastGestureZoom).abs() > 0.05) {
                   _lastGestureZoom = camera.zoom;
@@ -232,10 +235,17 @@ class _MapScreenState extends State<MapScreen> {
                 }
               },
               onMapEvent: (e) {
-                // A one-finger drag means "let me look around"; a pinch is just zoom, so snap back to the car.
-                if (e.source == MapEventSource.dragStart) _followPosition = false;
-                if (e.source == MapEventSource.multiFingerEnd && _followPosition && _position != null) {
-                  _map.move(_position!, _map.camera.zoom);
+                // flutter_map labels a pinch "drag" if it began with one finger, so judge by the outcome:
+                // zoom changed → pinch → snap back to the car; otherwise a drag → stop following.
+                if (e is MapEventMoveStart) _zoomAtGestureStart = e.camera.zoom;
+                if (e is MapEventMoveEnd && _zoomAtGestureStart != null) {
+                  final pinched = (e.camera.zoom - _zoomAtGestureStart!).abs() > 0.05;
+                  _zoomAtGestureStart = null;
+                  if (pinched) {
+                    if (_followPosition && _position != null) _map.move(_position!, e.camera.zoom);
+                  } else {
+                    _followPosition = false;
+                  }
                 }
               },
             ),
