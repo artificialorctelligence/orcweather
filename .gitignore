@@ -47,5 +47,6 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Orclab local state
-.orclab/
+# Orclab local state (git-repo.json, test reports) — test.yaml is project config and tracked
+.orclab/*
+!.orclab/test.yaml

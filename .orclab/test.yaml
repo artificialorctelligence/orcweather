@@ -1,0 +1,5 @@
+languages:
+  kotlin:
+    # android/ has only Flutter's template MainActivity; a bare `gradlew test` also runs every
+    # plugin's own unit tests (shared_preferences_android fails here, not ours). Our module only.
+    test: ./gradlew :app:testDebugUnitTest
