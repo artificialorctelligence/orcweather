@@ -151,3 +151,36 @@ a `MarkerLayer` of small bolts fading with age, refreshed on the 2-minute tick (
 warning is active), a `Settings.lightning` bool persisted like the others, default on once it
 exists — a dead toggle is worse than none, so the setting lands with the layer, not before.
 Attribution: "Lightning: NOAA GOES GLM" in the sources dialog.
+
+## #12: Finish /orc-test generate round 2: kill the surviving mutants, clear TCE 70
+
+Where it stopped 2026-09-15 night, to be picked up first. Round 1 raised coverage to 92.0% of
+587 lines (all files measured) but TCE was 52% over everything. Round 2's diagnostic run
+(`mutation_test.xml` at the project root — logic files only, colour table and debug fixture
+excluded with the reason in the file; `dart run mutation_test mutation_test.xml -c
+coverage/lcov.info -f xunit -o .orclab/test/dart/round2`) scored **65% killed, 127 of 362
+survived**, report at `.orclab/test/dart/round2/mutation-test.xunit.xml` (per-file classname,
+`LineNN_<mutation>` names).
+
+What survives and the test that kills it:
+- `lib/main.dart` (58): four `if`s — `_onMapEvent` follow/snap-back branches (lines ~194–228),
+  `_snapBack` guard, `_refreshRoads` gate call, the strip's `roadsBad` chip (~553). Needs a
+  widget test that performs a real one-finger drag (following stops, recenter button restores)
+  and a two-pointer pinch with Center-on-zoom on/off (snap back vs not), plus a strip case with
+  `roadRisk` set but `reportedBad == 0` (the `!` amber chip).
+- `lib/map_logic.dart` (8): `skyIcon` alternatives (sleet, ice, drizzle, haze, smoke, overcast);
+  `roadsDue` at exactly 30 min; `fitBounds` exact N/S/E/W distances.
+- `lib/road_risk.dart` (2): boundaries — exactly 34°F with precip → ice; exactly 30% precip → wet.
+- `lib/compass.dart` (6): assert the smoothed value after one sample is exactly 20% of the way
+  (alpha 0.2) and the upright threshold at |az| = 0.7.
+- `lib/librewxr.dart`/`wzdx.dart`/`idot.dart`/`nws.dart` (12): exact bbox edge distances
+  (`Distance().offset` at 0/90/180/270 → ±0.72° lat at 80 km), lat/lon rounding to 4 dp.
+- `lib/config.dart` (4): constants — leave; data.
+
+Then: `flutter test` green, re-run the same mutation command (~21 min), show before → after
+(65% → target ≥70%), commit with /orc-git. Rule: never a third round without asking.
+
+Two orclab tooling findings to file in orclab's own backlog (not done): `run.py` treats
+mutation_test's exit 255 (its own gate failed) as "not measurable" though the report exists,
+and its `-f junit` report has no file names — `-f xunit` does (classname). `run.py` should
+also accept a project `mutation_test.xml`.

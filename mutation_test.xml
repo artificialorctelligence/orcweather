@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mutation-testing targets: the logic, not the data.
+     lib/nws_colors.dart is a 111-row lookup table copied from weather.gov (a sign flip on each
+     priority number is a "mutant" no reasonable test asserts), and lib/debug_alerts.dart is a
+     debug-only fixture. Everything else in lib/ is fair game. -->
+<mutations version="1.2">
+  <files>
+    <file>lib/main.dart</file>
+    <file>lib/map_logic.dart</file>
+    <file>lib/librewxr.dart</file>
+    <file>lib/nws.dart</file>
+    <file>lib/wzdx.dart</file>
+    <file>lib/idot.dart</file>
+    <file>lib/road_risk.dart</file>
+    <file>lib/settings.dart</file>
+    <file>lib/compass.dart</file>
+    <file>lib/config.dart</file>
+  </files>
+  <commands>
+    <command group="test" expected-return="0" working-directory="." timeout="120">flutter test</command>
+  </commands>
+  <threshold failure="70"/>
+</mutations>
