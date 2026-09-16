@@ -54,6 +54,8 @@ class _MapScreenState extends State<MapScreen> {
   bool _moving = false; // GPS course wins while moving (car bodies skew the compass); compass when stopped
   StreamSubscription<double>? _compassSub;
   Timer? _attributionBanner;
+  Timer? _zoomBadgeTimer;
+  String? _zoomBadge; // shown for a moment after the zoom controls are used
   bool _showAttribution = true; // OSMF guideline: visible at first, collapses to (i) after 5 s
   RadarFrame? _radar;
   List<WeatherAlert> _alerts = const [];
@@ -89,6 +91,7 @@ class _MapScreenState extends State<MapScreen> {
     _positionSub?.cancel();
     _compassSub?.cancel();
     _attributionBanner?.cancel();
+    _zoomBadgeTimer?.cancel();
     _refresh?.cancel();
     _client.close();
     _settings.dispose();
@@ -168,9 +171,24 @@ class _MapScreenState extends State<MapScreen> {
     );
     _map.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(16)));
     _followPosition = true;
+    _flashZoom();
   }
 
-  void _zoomBy(double delta) => _map.move(_map.camera.center, _map.camera.zoom + delta);
+  void _zoomBy(double delta) {
+    _map.move(_map.camera.center, _map.camera.zoom + delta);
+    _flashZoom();
+  }
+
+  /// "Zoom 9 · 31 mi across" for 1.5 s. Miles = ground width of the screen's short side at this latitude.
+  void _flashZoom() {
+    final cam = _map.camera;
+    final shortSide = math.min(cam.nonRotatedSize.width, cam.nonRotatedSize.height);
+    final metersPerPixel = 156543.03 * math.cos(cam.center.latitude * math.pi / 180) / math.pow(2, cam.zoom);
+    final miles = shortSide * metersPerPixel / metersPerMile;
+    _zoomBadgeTimer?.cancel();
+    setState(() => _zoomBadge = 'Zoom ${cam.zoom.toStringAsFixed(1)} · ${miles.round()} mi across');
+    _zoomBadgeTimer = Timer(const Duration(milliseconds: 1500), () => setState(() => _zoomBadge = null));
+  }
 
   /// Every alert under the tap, most urgent first (NWS priority, then CAP severity).
   void _showAlerts(List<WeatherAlert> hits) {
@@ -273,6 +291,22 @@ class _MapScreenState extends State<MapScreen> {
               ],
             ],
           ),
+          if (_zoomBadge != null)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Card(
+                    color: Colors.black.withValues(alpha: 0.75),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Text(_zoomBadge!, style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           SafeArea(
             child: Align(
               alignment: Alignment.bottomRight,
