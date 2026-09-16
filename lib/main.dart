@@ -206,11 +206,11 @@ class _MapScreenState extends State<MapScreen> {
 
   void _snapBack() {
     if (!_recenterAfterGesture || _position == null) return;
+    _recenterAfterGesture = false;
     final here = _position!;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _recenterAfterGesture = false;
-      _map.move(here, _map.camera.zoom);
+    // Next event-loop turn: outside flutter_map's event dispatch, and not tied to a frame that may never come.
+    Future<void>(() {
+      if (mounted) _map.move(here, _map.camera.zoom);
     });
   }
 
