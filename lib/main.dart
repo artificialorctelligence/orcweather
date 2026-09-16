@@ -184,7 +184,8 @@ class _MapScreenState extends State<MapScreen> {
 
   /// A pinch reaches us as up to three gestures (first finger "drag", multi-finger, last finger "drag"),
   /// so decide by outcome: the map centre moved more than a thumb-wobble with no zoom change → a real
-  /// drag → stop following; the zoom changed → a pinch → snap back to the car once any fling is over.
+  /// drag → stop following; the zoom changed → a pinch → snap back to the car (and follow again) once
+  /// any fling is over.
   void _onMapEvent(MapEvent e) {
     if (e is MapEventMoveStart && e.source != MapEventSource.mapController) {
       _zoomAtGestureStart = e.camera.zoom;
@@ -195,7 +196,9 @@ class _MapScreenState extends State<MapScreen> {
       _zoomAtGestureStart = null;
       _centerAtGestureStart = null;
       if (zoomed) {
-        _recenterAfterGesture = _followPosition;
+        // A pinch always comes home: recenter on the car and follow again, even after a drag.
+        _followPosition = true;
+        _recenterAfterGesture = true;
       } else if (movedPx > 24) {
         _followPosition = false;
       }
