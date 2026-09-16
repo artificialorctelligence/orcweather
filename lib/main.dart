@@ -258,16 +258,16 @@ class _MapScreenState extends State<MapScreen> {
                   ],
                 ),
               ),
-              PolylineLayer(polylines: [
+              IgnorePointer(child: PolylineLayer(polylines: [
                 for (final r in _roads)
                   if (!r.isClear)
                     for (final line in r.lines)
                       Polyline(points: line, color: _conditionColor(r.condition), strokeWidth: 5),
                 for (final z in _workZones)
                   Polyline(points: z.points, color: Colors.orange, strokeWidth: 3),
-              ]),
+              ])),
               if (here != null) ...[
-                CircleLayer(circles: [
+                IgnorePointer(child: CircleLayer(circles: [
                   CircleMarker(
                     point: here,
                     radius: defaultViewMiles * metersPerMile,
@@ -276,8 +276,8 @@ class _MapScreenState extends State<MapScreen> {
                     borderColor: Colors.white70,
                     borderStrokeWidth: 1.5,
                   ),
-                ]),
-                MarkerLayer(markers: [
+                ])),
+                IgnorePointer(child: MarkerLayer(markers: [
                   Marker(
                     point: here,
                     width: 28,
@@ -287,16 +287,16 @@ class _MapScreenState extends State<MapScreen> {
                       child: const Icon(Icons.navigation, color: Colors.lightBlueAccent, size: 28),
                     ),
                   ),
-                ]),
+                ])),
               ],
             ],
           ),
           if (_zoomBadge != null)
             SafeArea(
               child: Align(
-                alignment: Alignment.topCenter,
+                alignment: Alignment.bottomCenter,
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.only(bottom: 16),
                   child: Card(
                     color: Colors.black.withValues(alpha: 0.75),
                     child: Padding(
