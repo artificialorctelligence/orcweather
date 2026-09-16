@@ -226,11 +226,16 @@ class _MapScreenState extends State<MapScreen> {
               initialZoom: here == null ? 4 : 8,
               interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
               onPositionChanged: (camera, hasGesture) {
-                if (!hasGesture) return;
-                _followPosition = false;
-                if ((camera.zoom - _lastGestureZoom).abs() > 0.05) {
+                if (hasGesture && (camera.zoom - _lastGestureZoom).abs() > 0.05) {
                   _lastGestureZoom = camera.zoom;
                   _flashZoom();
+                }
+              },
+              onMapEvent: (e) {
+                // A one-finger drag means "let me look around"; a pinch is just zoom, so snap back to the car.
+                if (e.source == MapEventSource.dragStart) _followPosition = false;
+                if (e.source == MapEventSource.multiFingerEnd && _followPosition && _position != null) {
+                  _map.move(_position!, _map.camera.zoom);
                 }
               },
             ),
