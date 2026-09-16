@@ -59,6 +59,7 @@ class _MapScreenState extends State<MapScreen> {
   String? _zoomBadge; // shown for a moment after the zoom changes
   double _lastGestureZoom = 0;
   double? _zoomAtGestureStart;
+  LatLng? _centerAtGestureStart;
   bool _recenterAfterGesture = false;
   bool _showAttribution = true; // OSMF guideline: visible at first, collapses to (i) after 5 s
   RadarFrame? _radar;
@@ -181,18 +182,21 @@ class _MapScreenState extends State<MapScreen> {
     _flashZoom();
   }
 
-  /// flutter_map labels a pinch "drag" if it began with one finger, so judge by the outcome:
-  /// zoom changed → pinch → snap back to the car once any fling has finished; otherwise a drag → stop following.
+  /// A pinch reaches us as up to three gestures (first finger "drag", multi-finger, last finger "drag"),
+  /// so decide by outcome: the map centre moved more than a thumb-wobble with no zoom change → a real
+  /// drag → stop following; the zoom changed → a pinch → snap back to the car once any fling is over.
   void _onMapEvent(MapEvent e) {
     if (e is MapEventMoveStart && e.source != MapEventSource.mapController) {
       _zoomAtGestureStart = e.camera.zoom;
+      _centerAtGestureStart = e.camera.center;
     } else if (e is MapEventMoveEnd && _zoomAtGestureStart != null) {
-      final pinched = (e.camera.zoom - _zoomAtGestureStart!).abs() > 0.05;
+      final zoomed = (e.camera.zoom - _zoomAtGestureStart!).abs() > 0.05;
+      final movedPx = (e.camera.latLngToScreenOffset(_centerAtGestureStart!) - e.camera.latLngToScreenOffset(e.camera.center)).distance;
       _zoomAtGestureStart = null;
-      if (pinched) {
+      _centerAtGestureStart = null;
+      if (zoomed) {
         _recenterAfterGesture = _followPosition;
-        _snapBack(); // no fling case; harmless if a fling follows, we snap again when it ends
-      } else {
+      } else if (movedPx > 24) {
         _followPosition = false;
       }
     } else if (e is MapEventFlingAnimationEnd || e is MapEventFlingAnimationNotStarted) {
