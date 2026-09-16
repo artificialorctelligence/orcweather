@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'config.dart';
 import 'idot.dart';
@@ -42,6 +44,7 @@ class _MapScreenState extends State<MapScreen> {
   late final _idot = Idot(_client);
 
   LatLng? _position;
+  double _headingDeg = 0; // course over ground from GPS; meaningful only while moving
   RadarFrame? _radar;
   List<WeatherAlert> _alerts = const [];
   Conditions? _conditions;
@@ -86,7 +89,10 @@ class _MapScreenState extends State<MapScreen> {
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25),
     ).listen((p) {
       final first = _position == null;
-      setState(() => _position = LatLng(p.latitude, p.longitude));
+      setState(() {
+        _position = LatLng(p.latitude, p.longitude);
+        if (p.heading >= 0 && p.speed > 1) _headingDeg = p.heading; // ponytail: GPS course only; compass when standing still needs a sensor plugin
+      });
       if (first) {
         _fitRadius();
         _refreshWeather();
@@ -164,7 +170,7 @@ class _MapScreenState extends State<MapScreen> {
               TileLayer(urlTemplate: baseTileUrl, userAgentPackageName: applicationId),
               if (_radar != null)
                 Opacity(
-                  opacity: 0.7,
+                  opacity: 0.6,
                   child: TileLayer(urlTemplate: _radar!.tileUrl(librewxrHost), userAgentPackageName: applicationId),
                 ),
               PolygonLayer(polygons: [
@@ -197,33 +203,52 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ]),
                 MarkerLayer(markers: [
-                  Marker(point: here, width: 24, height: 24, child: const Icon(Icons.navigation, color: Colors.lightBlueAccent)),
+                  Marker(
+                    point: here,
+                    width: 28,
+                    height: 28,
+                    child: Transform.rotate(
+                      angle: _headingDeg * math.pi / 180,
+                      child: const Icon(Icons.navigation, color: Colors.lightBlueAccent, size: 28),
+                    ),
+                  ),
                 ]),
               ],
-              const SimpleAttributionWidget(source: Text('$baseAttribution · $librewxrAttribution · NWS')),
+              RichAttributionWidget(
+                alignment: AttributionAlignment.bottomLeft,
+                popupInitialDisplayDuration: const Duration(seconds: 5),
+                attributions: [
+                  TextSourceAttribution(baseAttribution, onTap: () => launchUrl(Uri.parse('https://openstreetmap.org/copyright'))),
+                  TextSourceAttribution(librewxrAttribution, onTap: () => launchUrl(Uri.parse('https://librewxr.net'))),
+                  const TextSourceAttribution('Precipitation data from NOAA Enterprise Rain Rate (RRQPE)'),
+                  const TextSourceAttribution('Conditions and warnings from the US National Weather Service'),
+                  const TextSourceAttribution('Road conditions from Illinois DOT; work zones via USDOT WZDx'),
+                  const TextSourceAttribution('Not an official warning source. Estimates are marked as such.', prependCopyright: false),
+                ],
+              ),
             ],
           ),
           SafeArea(
             child: Align(
-              alignment: Alignment.topLeft,
-              child: _ConditionsPanel(
-                conditions: _conditions,
-                alerts: _alerts,
-                error: _error,
-                roadRisk: roadRisk(_conditions, _alerts),
-                reportedBad: _roads.where((r) => !r.isClear).length,
-                workZones: _workZones.length,
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.centerRight,
+              alignment: Alignment.topRight,
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 300),
+                      child: _ConditionsPanel(
+                        conditions: _conditions,
+                        alerts: _alerts,
+                        error: _error,
+                        roadRisk: roadRisk(_conditions, _alerts),
+                        reportedBad: _roads.where((r) => !r.isClear).length,
+                        workZones: _workZones.length,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     _ZoomButton(icon: Icons.add, onPressed: () => _zoomBy(1)),
                     const SizedBox(height: 8),
                     _ZoomButton(icon: Icons.remove, onPressed: () => _zoomBy(-1)),
@@ -289,7 +314,7 @@ class _ConditionsPanel extends StatelessWidget {
     final worst = alerts.isEmpty ? null : alerts.reduce((a, b) => _rank(a.severity) >= _rank(b.severity) ? a : b);
     final text = Theme.of(context).textTheme;
     return Card(
-      margin: const EdgeInsets.all(8),
+      margin: EdgeInsets.zero,
       color: Colors.black.withValues(alpha: 0.7),
       child: Padding(
         padding: const EdgeInsets.all(12),
