@@ -14,6 +14,7 @@ import 'config.dart';
 import 'debug_alerts.dart';
 import 'idot.dart';
 import 'librewxr.dart';
+import 'map_logic.dart';
 import 'nws.dart';
 import 'nws_colors.dart';
 import 'road_risk.dart';
@@ -34,7 +35,12 @@ class OrcWeatherApp extends StatelessWidget {
 }
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  /// Everything that leaves the process can be injected, so a widget test runs with fakes.
+  const MapScreen({super.key, this.client, this.positions, this.headings, this.tileProvider});
+  final http.Client? client;
+  final Stream<Position>? positions;
+  final Stream<double>? headings;
+  final TileProvider? tileProvider;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -42,7 +48,7 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final _map = MapController();
-  final _client = http.Client();
+  late final _client = widget.client ?? http.Client();
   late final _wxr = LibreWxr(_client);
   late final _nws = Nws(_client);
   late final _wzdx = Wzdx(_client);
@@ -84,7 +90,7 @@ class _MapScreenState extends State<MapScreen> {
     _settings.addListener(() => setState(() {}));
     _settings.load();
     _startLocation();
-    _compassSub = Compass().headings.listen((h) {
+    _compassSub = (widget.headings ?? Compass().headings).listen((h) {
       if (!_moving) setState(() => _headingDeg = h);
     });
     _attributionBanner = Timer(const Duration(seconds: 5), () => setState(() => _showAttribution = false));
@@ -104,21 +110,27 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _startLocation() async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+    Stream<Position> positions;
+    if (widget.positions != null) {
+      positions = widget.positions!;
+    } else {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        setState(() => _error = 'Location permission denied');
+        return;
+      }
+      positions = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25),
+      );
     }
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      setState(() => _error = 'Location permission denied');
-      return;
-    }
-    _positionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25),
-    ).listen((p) {
+    _positionSub = positions.listen((p) {
       final first = _position == null;
       setState(() {
         _position = LatLng(p.latitude, p.longitude);
-        _moving = p.speed > 2 && p.heading >= 0; // ~4.5 mph
+        _moving = movingFix(speedMps: p.speed, heading: p.heading);
         if (_moving) _headingDeg = p.heading;
       });
       if (first) {
@@ -157,10 +169,8 @@ class _MapScreenState extends State<MapScreen> {
 
   /// Road layers are statewide downloads (up to ~10 MB): only on state change or every 30 min.
   Future<void> _refreshRoads(LatLng here, String? state) async {
-    if (state == null) return;
-    final stale = _roadsAt == null || DateTime.now().difference(_roadsAt!) > _roadsEvery;
-    if (state == _roadsState && !stale) return;
-    _roadsState = state;
+    if (!roadsDue(state: state, lastState: _roadsState, lastAt: _roadsAt, now: DateTime.now(), every: _roadsEvery)) return;
+    _roadsState = state!;
     _roadsAt = DateTime.now();
     final zones = await _wzdx.near(here, _radiusMeters, state);
     final roads = state == 'IL' ? await _idot.near(here, _radiusMeters) : const <RoadCondition>[];
@@ -171,13 +181,7 @@ class _MapScreenState extends State<MapScreen> {
   void _fitRadius() {
     final here = _position;
     if (here == null) return;
-    const d = Distance();
-    const view = defaultViewMiles * metersPerMile;
-    final bounds = LatLngBounds(
-      d.offset(here, view, 315),
-      d.offset(here, view, 135),
-    );
-    _map.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(16)));
+    _map.fitCamera(CameraFit.bounds(bounds: fitBounds(here, defaultViewMiles * metersPerMile), padding: const EdgeInsets.all(16)));
     _followPosition = true;
     _flashZoom();
   }
@@ -191,18 +195,19 @@ class _MapScreenState extends State<MapScreen> {
       _zoomAtGestureStart = e.camera.zoom;
       _centerAtGestureStart = e.camera.center;
     } else if (e is MapEventMoveEnd && _zoomAtGestureStart != null) {
-      final zoomed = (e.camera.zoom - _zoomAtGestureStart!).abs() > 0.05;
       final movedPx = (e.camera.latLngToScreenOffset(_centerAtGestureStart!) - e.camera.latLngToScreenOffset(e.camera.center)).distance;
+      final outcome = classifyGesture(zoomStart: _zoomAtGestureStart!, zoomEnd: e.camera.zoom, movedPx: movedPx);
       _zoomAtGestureStart = null;
       _centerAtGestureStart = null;
-      if (zoomed) {
-        if (_settings.centerOnZoom) {
+      switch (outcome) {
+        case GestureOutcome.pinch when _settings.centerOnZoom:
           // "Center on zoom": a pinch comes home — recenter on the car and follow again, even after a drag.
           _followPosition = true;
           _recenterAfterGesture = true;
-        }
-      } else if (movedPx > 24) {
-        _followPosition = false;
+        case GestureOutcome.drag:
+          _followPosition = false;
+        case GestureOutcome.pinch || GestureOutcome.none:
+          break;
       }
     } else if (e is MapEventFlingAnimationEnd || e is MapEventFlingAnimationNotStarted) {
       _snapBack();
@@ -232,11 +237,12 @@ class _MapScreenState extends State<MapScreen> {
   /// "Zoom 9 · 31 mi across" for 1.5 s. Miles = ground width of the screen's short side at this latitude.
   void _flashZoom() {
     final cam = _map.camera;
-    final shortSide = math.min(cam.nonRotatedSize.width, cam.nonRotatedSize.height);
-    final metersPerPixel = 156543.03 * math.cos(cam.center.latitude * math.pi / 180) / math.pow(2, cam.zoom);
-    final miles = shortSide * metersPerPixel / metersPerMile;
     _zoomBadgeTimer?.cancel();
-    setState(() => _zoomBadge = 'Zoom ${cam.zoom.toStringAsFixed(1)} · ${miles.round()} mi across');
+    setState(() => _zoomBadge = zoomBadge(
+          zoom: cam.zoom,
+          latitude: cam.center.latitude,
+          shortSidePx: math.min(cam.nonRotatedSize.width, cam.nonRotatedSize.height),
+        ));
     _zoomBadgeTimer = Timer(const Duration(milliseconds: 1500), () => setState(() => _zoomBadge = null));
   }
 
@@ -285,12 +291,12 @@ class _MapScreenState extends State<MapScreen> {
                 colorFilter: _settings.darkMap(MediaQuery.platformBrightnessOf(context))
                     ? const ColorFilter.matrix(_darkTiles)
                     : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
-                child: TileLayer(urlTemplate: baseTileUrl, userAgentPackageName: applicationId),
+                child: TileLayer(urlTemplate: baseTileUrl, userAgentPackageName: applicationId, tileProvider: widget.tileProvider),
               ),
               if (_radar != null)
                 Opacity(
                   opacity: 0.6,
-                  child: TileLayer(urlTemplate: _radar!.tileUrl(librewxrHost), userAgentPackageName: applicationId),
+                  child: TileLayer(urlTemplate: _radar!.tileUrl(librewxrHost), userAgentPackageName: applicationId, tileProvider: widget.tileProvider),
                 ),
               GestureDetector(
                 onTap: () {
@@ -402,7 +408,7 @@ class _MapScreenState extends State<MapScreen> {
           SafeArea(
             child: Align(
               alignment: Alignment.topRight,
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -486,7 +492,7 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
   Widget build(BuildContext context) {
     final c = widget.conditions;
     final alerts = widget.alerts;
-    final worst = alerts.isEmpty ? null : alerts.reduce((a, b) => hazardPriority(a.event) <= hazardPriority(b.event) ? a : b);
+    final worst = worstAlert(alerts);
     final text = Theme.of(context).textTheme;
     final roadsBad = widget.reportedBad > 0 || widget.roadRisk != null;
     return GestureDetector(
@@ -507,10 +513,10 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
   }
 
   /// One row: sky icon + temp · wind · precip · alerts · roads · work zones.
-  Widget _compact(Conditions c, WeatherAlert? worst, bool roadsBad, TextTheme text) => Row(
-        mainAxisSize: MainAxisSize.min,
+  Widget _compact(Conditions c, WeatherAlert? worst, bool roadsBad, TextTheme text) => Wrap(
+        runSpacing: 4,
         children: [
-          _chip(_skyIcon(c.shortForecast), widget.settings.formatTemp(c.temperatureF), text),
+          _chip(skyIcon(c.shortForecast), widget.settings.formatTemp(c.temperatureF), text),
           _chip(Icons.air, '${c.windDirection} ${c.windSpeed.replaceAll(' mph', '')}', text),
           if ((c.precipChance ?? 0) > 0) _chip(Icons.umbrella, '${c.precipChance}%', text),
           if (worst != null) _chip(Icons.warning_amber, '${widget.alerts.length}', text, color: hazardColor(worst.event, worst.severity)),
@@ -578,16 +584,10 @@ class _AlertTile extends StatelessWidget {
         Text('$kind · until $until', style: text.labelMedium),
       ]),
       const SizedBox(height: 6),
-      Text(_brief(alert.description), style: text.bodyMedium, maxLines: 6, overflow: TextOverflow.ellipsis),
+      Text(briefDescription(alert.description), style: text.bodyMedium, maxLines: 6, overflow: TextOverflow.ellipsis),
     ]);
   }
 
-  /// First readable chunk of a CAP description: drop the product code line and collapse whitespace.
-  static String _brief(String d) {
-    final lines = d.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
-    if (lines.isNotEmpty && RegExp(r'^[A-Z]{3,6}\s*$').hasMatch(lines.first)) lines.removeAt(0);
-    return lines.join(' ').replaceAll(RegExp(r'\s+'), ' ');
-  }
 }
 
 /// Inverted grayscale: dark ground, light roads, no orange water. Base tiles only.
@@ -674,12 +674,3 @@ class _SettingsDialog extends StatelessWidget {
       );
 }
 
-IconData _skyIcon(String forecast) {
-  final f = forecast.toLowerCase();
-  if (f.contains('thunder')) return Icons.thunderstorm;
-  if (f.contains('snow') || f.contains('sleet') || f.contains('ice')) return Icons.ac_unit;
-  if (f.contains('rain') || f.contains('shower') || f.contains('drizzle')) return Icons.water_drop;
-  if (f.contains('fog') || f.contains('haze') || f.contains('smoke')) return Icons.foggy;
-  if (f.contains('cloud') || f.contains('overcast')) return Icons.cloud;
-  return Icons.wb_sunny;
-}
