@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'compass.dart';
 import 'config.dart';
+import 'debug_alerts.dart';
 import 'idot.dart';
 import 'librewxr.dart';
 import 'nws.dart';
@@ -55,7 +56,8 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<double>? _compassSub;
   Timer? _attributionBanner;
   Timer? _zoomBadgeTimer;
-  String? _zoomBadge; // shown for a moment after the zoom controls are used
+  String? _zoomBadge; // shown for a moment after the zoom changes
+  double _lastGestureZoom = 0;
   bool _showAttribution = true; // OSMF guideline: visible at first, collapses to (i) after 5 s
   RadarFrame? _radar;
   List<WeatherAlert> _alerts = const [];
@@ -137,7 +139,10 @@ class _MapScreenState extends State<MapScreen> {
       if (!mounted) return;
       setState(() {
         _radar = (results[0] as RadarFrames).latest;
-        _alerts = results[1] as List<WeatherAlert>;
+        _alerts = [
+          ...results[1] as List<WeatherAlert>,
+          if (fakeAlertsEnabled) ...fakeAlertsAround(here),
+        ];
         _conditions = results[2] as Conditions;
         _error = null;
       });
@@ -220,8 +225,13 @@ class _MapScreenState extends State<MapScreen> {
               initialCenter: here ?? const LatLng(39.5, -98.35),
               initialZoom: here == null ? 4 : 8,
               interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
-              onPositionChanged: (_, hasGesture) {
-                if (hasGesture) _followPosition = false;
+              onPositionChanged: (camera, hasGesture) {
+                if (!hasGesture) return;
+                _followPosition = false;
+                if ((camera.zoom - _lastGestureZoom).abs() > 0.05) {
+                  _lastGestureZoom = camera.zoom;
+                  _flashZoom();
+                }
               },
             ),
             children: [
