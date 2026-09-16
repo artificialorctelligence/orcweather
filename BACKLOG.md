@@ -129,3 +129,25 @@ hosts point at the proxy; nothing else in the app changes. Keep LibreWXR self-ho
 (8 vCPU / 16 GiB minimum) as a separate, later decision — the proxy caches its public
 instance first. Consequence of not doing it: keys in the binary and every user hitting OSM
 and LibreWXR directly under one User-Agent, which is how an app gets blocked.
+
+**Update 2026-09-15:** first concrete consumer is lightning (#11) — the proxy owns the GOES GLM
+poller and the `/lightning` endpoint; nothing else in the app can provide it.
+
+## #11: Lightning layer from NOAA GLM via the proxy, with a settings toggle
+
+Asked 2026-09-15. Research the same day (orclab skill `source-lightning`): Blitzortung forbids it
+(raw data for participants only; "not allowed to use our lightning data for storm warning
+systems"); commercial APIs (Xweather, Vaisala) cost money; NWS has no lightning product. The
+free, public-domain source is NOAA's GOES-19 Geostationary Lightning Mapper on the public
+bucket `noaa-goes19` (`GLM-L2-LCFA/YYYY/DDD/HH/*.nc`, one netCDF per 20 s, ~400 KB, created
+~20 s after the period; GOES-18 covers the west). Verified live: 375 flashes in one file, 32
+within 300 km of Peoria. `flash_lat`/`flash_lon` are scaled int16 (apply `scale_factor` +
+`add_offset`); `flash_energy` in J; h5py + numpy read it in ~15 lines.
+
+Blocked on BACKLOG #10: the phone must not poll 1.2 MB/min of HDF5. Proxy job: poll the bucket
+every 20 s, keep a rolling 30 min of (lat, lon, time) in memory, serve
+`GET /lightning?bbox=w,s,e,n&minutes=15` as GeoJSON points with an `age_s` property. App side:
+a `MarkerLayer` of small bolts fading with age, refreshed on the 2-minute tick (or faster when a
+warning is active), a `Settings.lightning` bool persisted like the others, default on once it
+exists — a dead toggle is worse than none, so the setting lands with the layer, not before.
+Attribution: "Lightning: NOAA GOES GLM" in the sources dialog.
