@@ -68,6 +68,19 @@ void main() {
       expect(zones.map((z) => z.road), ['I-240 E / I-240 W']);
     });
 
+    test('within(): a point exactly at the radius counts; a metre further does not', () {
+      const d = Distance();
+      final edge = d.offset(peoria, 1000, 45);
+      final z = WorkZone(road: 'x', description: '', points: [edge]);
+      expect(z.within(peoria, 1000.5), isTrue);
+      expect(z.within(peoria, 999), isFalse);
+    });
+
+    test('registry 503 -> throws (nothing swallows a dead registry)', () async {
+      final client = MockClient((_) async => http.Response('down', 503));
+      expect(Wzdx(client).feedUrlsFor('IL'), throwsA(isA<http.ClientException>()));
+    });
+
     test('unknown state -> no feeds, no registry call', () async {
       var calls = 0;
       final client = MockClient((_) async { calls++; return http.Response('[]', 200); });
@@ -84,6 +97,11 @@ void main() {
       expect(roads[0].lines, hasLength(2));
       expect(roads[0].lines[0][0], const LatLng(40.5295, -89.8754));
       expect(roads[1].isClear, isTrue);
+    });
+
+    test('non-200 throws', () {
+      final client = MockClient((_) async => http.Response('nope', 500));
+      expect(Idot(client).near(peoria, 1000), throwsA(isA<http.ClientException>()));
     });
 
     test('query asks the server for a radius around the point in WGS84 GeoJSON', () async {
@@ -112,6 +130,12 @@ void main() {
       expect(roadRisk(null, [alert('Flood Warning')]), 'Flooding risk (alert)');
     });
     test('unrelated alert -> falls through', () => expect(roadRisk(cond(), [alert('Heat Advisory')]), isNull));
+    test('boundaries: 34°F is ice, 35°F is wet; 30% precip is wet, 29% is nothing', () {
+      expect(roadRisk(cond(temp: 34, precip: 30), const []), startsWith('Ice risk'));
+      expect(roadRisk(cond(temp: 35, precip: 30), const []), 'Wet roads likely');
+      expect(roadRisk(cond(temp: 70, precip: 29), const []), isNull);
+      expect(roadRisk(cond(temp: 70, forecast: 'Light Rain'), const []), 'Wet roads likely'); // forecast text alone
+    });
   });
 
   test('NWS conditions carry the state from /points', () async {

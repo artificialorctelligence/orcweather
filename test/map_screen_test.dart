@@ -33,6 +33,26 @@ const _points = '{"properties":{"gridId":"ILX","forecastHourly":"https://api.wea
 const _hourly = '{"properties":{"periods":[{"temperature":98,"temperatureUnit":"F","windSpeed":"17 mph","windDirection":"S","shortForecast":"Chance Showers And Thunderstorms","probabilityOfPrecipitation":{"value":40},"relativeHumidity":{"value":33}}]}}';
 const _idot = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-89.7,40.7],[-89.5,40.7]]},"properties":{"WrcMntSectionName":"212 - PEORIA","COUNTY_NAM":"PEORIA","Condition":"Covered with ice or snow"}}]}';
 
+// A cold, quiet day: no alerts, IDOT all Clear, one keyless Illinois WZDx feed with a zone nearby.
+const _noAlerts = '{"type":"FeatureCollection","features":[]}';
+const _hourlyCold = '{"properties":{"periods":[{"temperature":28,"temperatureUnit":"F","windSpeed":"8 mph","windDirection":"NW","shortForecast":"Light Snow","probabilityOfPrecipitation":{"value":60}}]}}';
+const _idotClear = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-89.7,40.7],[-89.5,40.7]]},"properties":{"WrcMntSectionName":"212 - PEORIA","COUNTY_NAM":"PEORIA","Condition":"Clear"}}]}';
+const _registryIl = '[{"state":"illinois","feedname":"test","url":{"url":"https://wz.example.org/feed"},"active":true,"needapikey":false}]';
+const _wzFeed = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-89.60,40.70],[-89.61,40.71]]},"properties":{"core_details":{"event_type":"work-zone","road_names":["I-74"],"description":"Bridge work"}}}]}';
+
+http.Client coldBackend(List<Uri> log) => MockClient((r) async {
+      log.add(r.url);
+      final u = r.url.toString();
+      if (u.contains('weather-maps.json')) return http.Response(_weatherMaps, 200);
+      if (u.contains('/v2/alerts')) return http.Response(_noAlerts, 200);
+      if (u.contains('/points/')) return http.Response(_points, 200);
+      if (u.contains('/forecast/hourly')) return http.Response(_hourlyCold, 200);
+      if (u.contains('datahub.transportation.gov')) return http.Response(_registryIl, 200);
+      if (u.contains('wz.example.org')) return http.Response(_wzFeed, 200);
+      if (u.contains('IL_DOT_Winter_Road_Conditions')) return http.Response(_idotClear, 200);
+      return http.Response('unexpected $u', 500);
+    });
+
 http.Client fakeBackend(List<Uri> log) => MockClient((r) async {
       log.add(r.url);
       final u = r.url.toString();
@@ -45,9 +65,9 @@ http.Client fakeBackend(List<Uri> log) => MockClient((r) async {
       return http.Response('unexpected $u', 500);
     });
 
-Future<void> pumpMap(WidgetTester tester, {required StreamController<Position> positions, required StreamController<double> headings, required List<Uri> log}) async {
+Future<void> pumpMap(WidgetTester tester, {required StreamController<Position> positions, required StreamController<double> headings, required List<Uri> log, http.Client? client}) async {
   await tester.pumpWidget(MaterialApp(
-    home: MapScreen(client: fakeBackend(log), positions: positions.stream, headings: headings.stream, tileProvider: _BlankTiles()),
+    home: MapScreen(client: client ?? fakeBackend(log), positions: positions.stream, headings: headings.stream, tileProvider: _BlankTiles()),
   ));
   await tester.pump();
 }
@@ -106,14 +126,99 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('a second fix in the same state does not refetch the statewide road layers', (tester) async {
+  testWidgets('the 2-minute tick refetches weather but not the statewide road layers', (tester) async {
     await pumpMap(tester, positions: positions, headings: headings, log: log);
     positions.add(fix());
     await settle(tester);
-    final roadCalls = log.where((u) => u.host == 'services2.arcgis.com').length;
-    positions.add(fix(lat: 40.70, speed: 20, heading: 90));
+    int calls(String host) => log.where((u) => u.host == host).length;
+    final wx = calls('api.librewxr.net'), roads = calls('services2.arcgis.com'), wz = calls('datahub.transportation.gov');
+    await tester.pump(const Duration(minutes: 2));
     await settle(tester);
-    expect(log.where((u) => u.host == 'services2.arcgis.com').length, roadCalls);
+    expect(calls('api.librewxr.net'), greaterThan(wx));
+    expect(calls('services2.arcgis.com'), roads, reason: 'same state, under 30 min');
+    expect(calls('datahub.transportation.gov'), wz);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  Offset arrow(WidgetTester tester) => tester.getCenter(find.byIcon(Icons.navigation));
+  Offset mapCenter(WidgetTester tester) => tester.getCenter(find.byType(FlutterMap));
+
+  testWidgets('following: a new fix keeps the arrow centred; a drag stops that; recenter restores it', (tester) async {
+    await pumpMap(tester, positions: positions, headings: headings, log: log);
+    positions.add(fix());
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, lessThan(2));
+
+    positions.add(fix(lat: 40.75, lon: -89.50, speed: 20, heading: 45));
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, lessThan(2), reason: 'still following');
+
+    await tester.drag(find.byType(FlutterMap), const Offset(150, 0));
+    await settle(tester);
+    positions.add(fix(lat: 40.80, lon: -89.45, speed: 20, heading: 45));
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, greaterThan(50), reason: 'drag turned following off');
+
+    await tester.tap(find.byIcon(Icons.my_location));
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, lessThan(2), reason: 'recenter follows again');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  Future<void> pinchOffCentre(WidgetTester tester) async {
+    final c = mapCenter(tester);
+    // Both fingers to the right of centre, spreading apart: zooms in and drifts the centre.
+    final g1 = await tester.startGesture(c + const Offset(80, 0));
+    final g2 = await tester.startGesture(c + const Offset(120, 0));
+    await tester.pump(const Duration(milliseconds: 20));
+    for (var i = 0; i < 5; i++) {
+      await g1.moveBy(const Offset(-15, 0));
+      await g2.moveBy(const Offset(15, 0));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await g1.up();
+    await g2.up();
+    await settle(tester);
+  }
+
+  testWidgets('pinch with Center on zoom off: the map stays where the pinch left it', (tester) async {
+    await pumpMap(tester, positions: positions, headings: headings, log: log);
+    positions.add(fix());
+    await settle(tester);
+    await pinchOffCentre(tester);
+    expect(find.textContaining('mi across'), findsOneWidget, reason: 'zoom badge shows on pinch');
+    expect((arrow(tester) - mapCenter(tester)).distance, greaterThan(10));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('pinch with Center on zoom on: snaps back to the arrow and follows again, even after a drag', (tester) async {
+    await SharedPreferencesAsync().setBool('centerOnZoom', true);
+    await pumpMap(tester, positions: positions, headings: headings, log: log);
+    positions.add(fix());
+    await settle(tester);
+    await tester.drag(find.byType(FlutterMap), const Offset(150, 0));
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, greaterThan(50));
+
+    await pinchOffCentre(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, lessThan(2), reason: 'pinch came home');
+
+    positions.add(fix(lat: 40.75, lon: -89.50, speed: 20, heading: 45));
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, lessThan(2), reason: 'following resumed');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('zoom buttons with Center on zoom on recenter too', (tester) async {
+    await SharedPreferencesAsync().setBool('centerOnZoom', true);
+    await pumpMap(tester, positions: positions, headings: headings, log: log);
+    positions.add(fix());
+    await settle(tester);
+    await tester.drag(find.byType(FlutterMap), const Offset(150, 0));
+    await settle(tester);
+    await tester.tap(find.byIcon(Icons.remove));
+    await settle(tester);
+    expect((arrow(tester) - mapCenter(tester)).distance, lessThan(2));
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -144,6 +249,29 @@ void main() {
     expect(find.text('37°C'), findsOneWidget);
     expect(await SharedPreferencesAsync().getString('tempUnit'), 'c'); // same in-memory store the screen wrote to
 
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('cold quiet day: estimated ice risk (amber !), a work zone, no alert chip; card wording', (tester) async {
+    await pumpMap(tester, positions: positions, headings: headings, log: log, client: coldBackend(log));
+    positions.add(fix());
+    await settle(tester);
+
+    expect(find.text('28°F'), findsOneWidget);
+    expect(find.byIcon(Icons.warning_amber), findsNothing, reason: 'no alerts → no alert chip');
+    expect(find.byIcon(Icons.ac_unit), findsNWidgets(2), reason: 'sky icon (snow) + roads chip');
+    expect(find.text('!'), findsOneWidget, reason: 'estimated risk, nothing reported');
+    expect(find.byIcon(Icons.construction), findsOneWidget);
+    expect(find.text('1'), findsOneWidget, reason: 'one work zone');
+
+    await tester.tap(find.text('28°F'));
+    await tester.pump();
+    expect(find.textContaining('Ice risk'), findsOneWidget);
+    expect(find.textContaining('— estimate'), findsOneWidget);
+    expect(find.textContaining('reported snow/ice'), findsNothing);
+    expect(find.textContaining('1 work zone within 50 mi'), findsOneWidget);
+    expect(find.textContaining('alert'), findsNothing);
+    expect(find.textContaining('RH'), findsNothing, reason: 'humidity absent from this period');
     await tester.pumpWidget(const SizedBox());
   });
 

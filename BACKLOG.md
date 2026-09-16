@@ -152,7 +152,7 @@ warning is active), a `Settings.lightning` bool persisted like the others, defau
 exists — a dead toggle is worse than none, so the setting lands with the layer, not before.
 Attribution: "Lightning: NOAA GOES GLM" in the sources dialog.
 
-## #12: Finish /orc-test generate round 2: kill the surviving mutants, clear TCE 70
+## #12: Finish /orc-test generate round 2: kill the surviving mutants, clear TCE 70 (RESOLVED 2026-09-16)
 
 Where it stopped 2026-09-15 night, to be picked up first. Round 1 raised coverage to 92.0% of
 587 lines (all files measured) but TCE was 52% over everything. Round 2's diagnostic run
@@ -184,3 +184,19 @@ Two orclab tooling findings to file in orclab's own backlog (not done): `run.py`
 mutation_test's exit 255 (its own gate failed) as "not measurable" though the report exists,
 and its `-f junit` report has no file names — `-f xunit` does (classname). `run.py` should
 also accept a project `mutation_test.xml`.
+
+**Resolved for real, not just tracked** (2026-09-16): 17 tests added (59 → 76) against the
+survivor list — boundary assertions on `roadsDue` (30:00 vs 30:01), `movingFix` (2 m/s, heading
+0), `roadRisk` (34/35°F, 29/30%), `skyIcon` alternatives, exact bbox edges via `Distance().offset`
+in LibreWXR/fitBounds, compass alpha (14.04° after one smoothed step) and the |z| = 0.7 axis
+flip, non-200 paths for NWS/WZDx/IDOT, and widget tests that drive a real one-finger drag and
+a two-pointer pinch with Center-on-zoom off/on, the 2-minute tick (weather refetched, roads
+not), and a cold quiet day (estimated `!` chip, work-zone chip, no alert chip). The old "second
+fix does not refetch roads" test was replaced — it passed trivially because weather refreshes
+only on the first fix. Re-ran the same mutation command: **72 of 362 undetected, 80.1% killed
+(was 127 undetected, 64.9%)**; mutation_test's own 70 gate passed (exit 0). Per file, survivors
+in main.dart 58 → 33, map_logic 8 → 3, road_risk 2 → 0. The remaining ones are constants
+(alpha, colour-matrix rows, radius/metre conventions) and equivalent mutants (cos(−x), bearing
+−0). Coverage unchanged at 92%. Hand check: raising the drag threshold 24 → 240 px made the
+drag widget test fail before revert.
+

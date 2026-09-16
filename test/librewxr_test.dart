@@ -63,6 +63,13 @@ void main() {
     expect(b[2], greaterThan(-97.5)); // east
     expect(b[3], greaterThan(35.5)); // north
     expect(b[3] - b[1], closeTo(1.45, 0.05)); // ~50 mi each way in degrees latitude
+    // Each edge is exactly the radius away, in the order west,south,east,north.
+    const d = Distance();
+    const c = LatLng(35.5, -97.5);
+    expect(b[0], closeTo(d.offset(c, 80467, 270).longitude, 1e-9));
+    expect(b[1], closeTo(d.offset(c, 80467, 180).latitude, 1e-9));
+    expect(b[2], closeTo(d.offset(c, 80467, 90).longitude, 1e-9));
+    expect(b[3], closeTo(d.offset(c, 80467, 0).latitude, 1e-9));
   });
 
   test('event name and kind from titles; NWS colours', () {

@@ -36,6 +36,13 @@ void main() {
     test('crossing into another state → due immediately', () {
       expect(roadsDue(state: 'IA', lastState: 'IL', lastAt: t0, now: t0.add(const Duration(minutes: 1))), isTrue);
     });
+    test('exactly 30 minutes is not yet due; one second more is', () {
+      expect(roadsDue(state: 'IL', lastState: 'IL', lastAt: t0, now: t0.add(const Duration(minutes: 30))), isFalse);
+      expect(roadsDue(state: 'IL', lastState: 'IL', lastAt: t0, now: t0.add(const Duration(minutes: 30, seconds: 1))), isTrue);
+    });
+    test('custom interval is honoured', () {
+      expect(roadsDue(state: 'IL', lastState: 'IL', lastAt: t0, now: t0.add(const Duration(minutes: 6)), every: const Duration(minutes: 5)), isTrue);
+    });
   });
 
   group('worstAlert', () {
@@ -47,6 +54,11 @@ void main() {
         alert('Heat Advisory issued today by NWS Lincoln IL'),
       ]);
       expect(w!.event, 'Tornado Warning');
+    });
+    test('a tie keeps the earlier alert', () {
+      final first = alert('Flood Watch issued today by NWS A');
+      final w = worstAlert([first, alert('Flood Watch issued today by NWS B')]);
+      expect(identical(w, first), isTrue);
     });
     test('unknown events rank below every NWS event', () {
       final w = worstAlert([alert('yellow advisory - frost - in effect'), alert('Frost Advisory issued today by NWS X')]);
@@ -63,6 +75,15 @@ void main() {
       expect(skyIcon('Mostly Cloudy'), Icons.cloud);
       expect(skyIcon('Sunny'), Icons.wb_sunny);
       expect(skyIcon('Mostly Clear'), Icons.wb_sunny);
+    });
+    test('every alternative word maps, and thunder beats rain/snow words in the same string', () {
+      expect(skyIcon('Sleet'), Icons.ac_unit);
+      expect(skyIcon('Freezing Rain and Ice'), Icons.ac_unit); // ice wins over rain
+      expect(skyIcon('Drizzle'), Icons.water_drop);
+      expect(skyIcon('Haze'), Icons.foggy);
+      expect(skyIcon('Areas Of Smoke'), Icons.foggy);
+      expect(skyIcon('Overcast'), Icons.cloud);
+      expect(skyIcon('Snow and Thunder'), Icons.thunderstorm);
     });
   });
 
@@ -94,11 +115,27 @@ void main() {
       expect(movingFix(speedMps: 1.5, heading: 270), isFalse);
       expect(movingFix(speedMps: 15, heading: -1), isFalse);
     });
+    test('boundaries: exactly 2 m/s is not moving; heading 0 (due north) is valid', () {
+      expect(movingFix(speedMps: 2, heading: 90), isFalse);
+      expect(movingFix(speedMps: 2.01, heading: 0), isTrue);
+    });
   });
 
   group('fitBounds', () {
+    const p = LatLng(40.69, -89.59);
+    const r = 30 * 1609.344;
+    test('every edge is exactly the radius from the centre', () {
+      final b = fitBounds(p, r);
+      const d = Distance();
+      expect(d(p, LatLng(b.north, p.longitude)), closeTo(r, 1));
+      expect(d(p, LatLng(b.south, p.longitude)), closeTo(r, 1));
+      expect(d(p, LatLng(p.latitude, b.east)), closeTo(r, 1));
+      expect(d(p, LatLng(p.latitude, b.west)), closeTo(r, 1));
+      expect(b.north, greaterThan(p.latitude));
+      expect(b.east, greaterThan(p.longitude));
+    });
     test('30-mile view is a square ~60 mi across centred on the point', () {
-      final b = fitBounds(const LatLng(40.69, -89.59), 30 * 1609.344);
+      final b = fitBounds(p, r);
       const d = Distance();
       expect(d(b.northWest, b.southEast) / 1609.344, closeTo(84.9, 0.5)); // diagonal of a 60-mi square
       expect(b.center.latitude, closeTo(40.69, 0.01));

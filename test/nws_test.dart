@@ -30,6 +30,11 @@ void main() {
     expect(c.humidity, isNull);
   });
 
+  test('non-200 from /points throws', () {
+    final client = MockClient((_) async => http.Response('Service Unavailable', 503));
+    expect(Nws(client).conditions(const LatLng(35.47, -97.52)), throwsA(isA<http.ClientException>()));
+  });
+
   test('resolves /points then follows forecastHourly with a User-Agent', () async {
     final urls = <String>[];
     final client = MockClient((r) async {

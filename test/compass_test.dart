@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orcweather/compass.dart';
@@ -48,6 +49,14 @@ void main() {
     });
   });
 
+  test('upright/flat threshold sits at |z| = 0.7 of gravity', () {
+    // Same field, either side of the threshold: the forward axis flips from -z to +y.
+    final tilted69 = [0.0, math.sqrt(1 - 0.69 * 0.69), 0.69];
+    final tilted71 = [0.0, math.sqrt(1 - 0.71 * 0.71), 0.71];
+    expect(Compass.headingFrom(tilted69, [-20, -30, -25]), closeTo(97.42, 0.05));
+    expect(Compass.headingFrom(tilted71, [-20, -30, -25]), closeTo(100.47, 0.05));
+  });
+
   test('degenerate input → null', () {
     expect(Compass.headingFrom([0, 0, 0], [1, 0, 0]), isNull);
     expect(Compass.headingFrom([0, 0, g], [0, 0, 5]), isNull); // field parallel to gravity
@@ -83,9 +92,19 @@ void streamTests() {
     await Future<void>.delayed(Duration.zero);
     expect(out.single, closeTo(0, 1));
 
+    // An accelerometer-only update must also emit (both sensors drive the stream).
+    accel.add(_FakeAccel(0, 9.8, 0));
+    await Future<void>.delayed(Duration.zero);
+    expect(out, hasLength(2));
+
+    // One magnetometer step toward east: alpha 0.2 → smoothed field (-4, -40, -16) → 14.04°.
+    mag.add(_FakeMag(-20, -40, 0));
+    await Future<void>.delayed(Duration.zero);
+    expect(out.last, closeTo(14.04, 0.05));
+
     // Turn to face east: the low-pass filter moves 20% of the way per sample, so the heading
     // creeps toward 90 rather than jumping.
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 4; i++) {
       mag.add(_FakeMag(-20, -40, 0));
       await Future<void>.delayed(Duration.zero);
     }
