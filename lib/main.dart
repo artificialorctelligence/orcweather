@@ -220,7 +220,7 @@ class _MapScreenState extends State<MapScreen> {
                 CircleLayer(circles: [
                   CircleMarker(
                     point: here,
-                    radius: _radiusMeters,
+                    radius: defaultViewMiles * metersPerMile,
                     useRadiusInMeter: true,
                     color: Colors.transparent,
                     borderColor: Colors.white70,
