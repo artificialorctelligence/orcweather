@@ -13,6 +13,7 @@ void main() {
     await s.load();
     expect(s.tempUnit, TempUnit.f);
     expect(s.mapTheme, MapTheme.auto);
+    expect(s.centerOnZoom, isFalse);
   });
 
   test('formats and converts temperature', () {
@@ -28,10 +29,12 @@ void main() {
     final a = Settings(SharedPreferencesAsync());
     await a.setTempUnit(TempUnit.c);
     await a.setMapTheme(MapTheme.dark);
+    await a.setCenterOnZoom(true);
     final b = Settings(SharedPreferencesAsync());
     await b.load();
     expect(b.tempUnit, TempUnit.c);
     expect(b.mapTheme, MapTheme.dark);
+    expect(b.centerOnZoom, isTrue);
   });
 
   test('dark map decision', () {

@@ -196,9 +196,11 @@ class _MapScreenState extends State<MapScreen> {
       _zoomAtGestureStart = null;
       _centerAtGestureStart = null;
       if (zoomed) {
-        // A pinch always comes home: recenter on the car and follow again, even after a drag.
-        _followPosition = true;
-        _recenterAfterGesture = true;
+        if (_settings.centerOnZoom) {
+          // "Center on zoom": a pinch comes home — recenter on the car and follow again, even after a drag.
+          _followPosition = true;
+          _recenterAfterGesture = true;
+        }
       } else if (movedPx > 24) {
         _followPosition = false;
       }
@@ -218,7 +220,12 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _zoomBy(double delta) {
-    _map.move(_map.camera.center, _map.camera.zoom + delta);
+    if (_settings.centerOnZoom && _position != null) {
+      _followPosition = true;
+      _map.move(_position!, _map.camera.zoom + delta);
+    } else {
+      _map.move(_map.camera.center, _map.camera.zoom + delta);
+    }
     _flashZoom();
   }
 
@@ -652,6 +659,14 @@ class _SettingsDialog extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text('Auto follows the phone\'s dark mode.', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Center on zoom'),
+                subtitle: const Text('After a pinch or zoom button, jump back to your position and follow again'),
+                value: settings.centerOnZoom,
+                onChanged: settings.setCenterOnZoom,
+              ),
             ],
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],

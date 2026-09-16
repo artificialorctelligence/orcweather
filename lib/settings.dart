@@ -12,10 +12,12 @@ class Settings extends ChangeNotifier {
 
   TempUnit tempUnit = TempUnit.f;
   MapTheme mapTheme = MapTheme.auto;
+  bool centerOnZoom = false; // after a pinch or zoom button, recenter on the position and follow again
 
   Future<void> load() async {
     tempUnit = TempUnit.values.byName(await _prefs.getString('tempUnit') ?? 'f');
     mapTheme = MapTheme.values.byName(await _prefs.getString('mapTheme') ?? 'auto');
+    centerOnZoom = await _prefs.getBool('centerOnZoom') ?? false;
     notifyListeners();
   }
 
@@ -29,6 +31,12 @@ class Settings extends ChangeNotifier {
     mapTheme = t;
     notifyListeners();
     await _prefs.setString('mapTheme', t.name);
+  }
+
+  Future<void> setCenterOnZoom(bool v) async {
+    centerOnZoom = v;
+    notifyListeners();
+    await _prefs.setBool('centerOnZoom', v);
   }
 
   /// "74°F" or "23°C" from a Fahrenheit reading.
