@@ -135,7 +135,7 @@ poller and the `/lightning` endpoint; nothing else in the app can provide it.
 
 ## #11: Lightning layer from NOAA GLM via the proxy, with a settings toggle
 
-Asked 2026-09-15. Research the same day (orclab skill `source-lightning`): Blitzortung forbids it
+Asked 2026-09-15. Research the same day (`docs/research/source-lightning.md`): Blitzortung forbids it
 (raw data for participants only; "not allowed to use our lightning data for storm warning
 systems"); commercial APIs (Xweather, Vaisala) cost money; NWS has no lightning product. The
 free, public-domain source is NOAA's GOES-19 Geostationary Lightning Mapper on the public
