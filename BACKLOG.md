@@ -106,3 +106,26 @@ GPS speed the app already tracks (`_moving`), plus never on any car screen. Impl
 timer swapping the radar `TileLayer` urlTemplate through `past + nowcast`; prefetching the next
 frame's tiles keeps the loop smooth. Consequence of not doing it: no storm-motion cue on the
 phone; the still frame plus alerts remain.
+
+## #10: Proxy server for keys and shared upstreams (direflail's Python-capable web server)
+
+Decided 2026-09-15 while discussing how apps handle API keys. direflail has a web server that can
+run Python and will set it up. The app then talks to that host instead of upstreams directly,
+which solves three things at once:
+
+1. Keys never ship in the APK (IDOT CWZ work-zone key first; any future paid source) — the
+   proxy adds them server-side.
+2. Abuse and blocking land on the proxy, not on every phone's User-Agent: it can cache and
+   rate-limit per client, and OSM's tile policy and LibreWXR's terms both point heavy or
+   distributed use at exactly this shape (a CDN/cache in front is "encouraged" by LibreWXR).
+3. It is the natural home for the base-map switch (BACKLOG #1) — the proxy can front a
+   different tile provider or a self-hosted tile server later without an app update.
+
+Shape: a small FastAPI app (stack-web's back-end choice) with routes mirroring what
+`lib/config.dart` calls — `/tiles/base/{z}/{x}/{y}.png`, `/radar/...`, `/alerts`, `/nws/...`,
+`/workzones?state=`, `/roads?lat=&lon=` — each forwarding upstream with the right User-Agent
+and key, honouring upstream Cache-Control and adding its own cache. Then `lib/config.dart`
+hosts point at the proxy; nothing else in the app changes. Keep LibreWXR self-hosting
+(8 vCPU / 16 GiB minimum) as a separate, later decision — the proxy caches its public
+instance first. Consequence of not doing it: keys in the binary and every user hitting OSM
+and LibreWXR directly under one User-Agent, which is how an app gets blocked.
