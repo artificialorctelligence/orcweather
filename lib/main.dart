@@ -162,6 +162,7 @@ class _MapScreenState extends State<MapScreen> {
             options: MapOptions(
               initialCenter: here ?? const LatLng(39.5, -98.35),
               initialZoom: here == null ? 4 : 8,
+              interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
               onPositionChanged: (_, hasGesture) {
                 if (hasGesture) _followPosition = false;
               },
@@ -292,7 +293,7 @@ class _ZoomButton extends StatelessWidget {
       );
 }
 
-class _ConditionsPanel extends StatelessWidget {
+class _ConditionsPanel extends StatefulWidget {
   const _ConditionsPanel({
     required this.conditions,
     required this.alerts,
@@ -309,48 +310,98 @@ class _ConditionsPanel extends StatelessWidget {
   final int workZones;
 
   @override
+  State<_ConditionsPanel> createState() => _ConditionsPanelState();
+}
+
+class _ConditionsPanelState extends State<_ConditionsPanel> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    final c = conditions;
+    final c = widget.conditions;
+    final alerts = widget.alerts;
     final worst = alerts.isEmpty ? null : alerts.reduce((a, b) => _rank(a.severity) >= _rank(b.severity) ? a : b);
     final text = Theme.of(context).textTheme;
-    return Card(
-      margin: EdgeInsets.zero,
-      color: Colors.black.withValues(alpha: 0.7),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (c == null)
-              Text(error ?? 'Locating…', style: text.bodyLarge)
-            else ...[
-              Text('${c.temperatureF}°F  ${c.shortForecast}', style: text.headlineSmall),
-              Text('Wind ${c.windDirection} ${c.windSpeed}'
-                  '${c.precipChance != null ? '  ·  Precip ${c.precipChance}%' : ''}'
-                  '${c.humidity != null ? '  ·  RH ${c.humidity}%' : ''}', style: text.bodyLarge),
-            ],
-            if (worst != null) ...[
-              const SizedBox(height: 6),
-              Text('${alerts.length} alert${alerts.length == 1 ? '' : 's'} within ${radiusMiles.round()} mi',
-                  style: text.labelLarge?.copyWith(color: _severityColor(worst.severity))),
-              Text(worst.title, style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
-            ],
-            if (reportedBad > 0 || roadRisk != null || workZones > 0) ...[
-              const SizedBox(height: 6),
-              if (reportedBad > 0)
-                Text('Roads: $reportedBad section${reportedBad == 1 ? '' : 's'} reported snow/ice (IDOT)',
-                    style: text.bodyMedium?.copyWith(color: Colors.redAccent)),
-              if (roadRisk != null)
-                Text('Roads: $roadRisk — estimate', style: text.bodyMedium?.copyWith(color: Colors.amberAccent)),
-              if (workZones > 0) Text('$workZones work zone${workZones == 1 ? '' : 's'} within ${radiusMiles.round()} mi', style: text.bodySmall),
-            ],
-            if (c != null && error != null) Text(error!, style: text.bodySmall?.copyWith(color: Colors.orangeAccent)),
-          ],
+    final roadsBad = widget.reportedBad > 0 || widget.roadRisk != null;
+    return GestureDetector(
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Card(
+        margin: EdgeInsets.zero,
+        color: Colors.black.withValues(alpha: 0.7),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: c == null
+              ? Text(widget.error ?? 'Locating…', style: text.bodyLarge)
+              : _expanded
+                  ? _full(c, worst, text)
+                  : _compact(c, worst, roadsBad, text),
         ),
       ),
     );
   }
 
+  /// One row: sky icon + temp · wind · precip · alerts · roads · work zones.
+  Widget _compact(Conditions c, WeatherAlert? worst, bool roadsBad, TextTheme text) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _chip(_skyIcon(c.shortForecast), '${c.temperatureF}°', text),
+          _chip(Icons.air, '${c.windDirection} ${c.windSpeed.replaceAll(' mph', '')}', text),
+          if ((c.precipChance ?? 0) > 0) _chip(Icons.umbrella, '${c.precipChance}%', text),
+          if (worst != null) _chip(Icons.warning_amber, '${widget.alerts.length}', text, color: _severityColor(worst.severity)),
+          if (roadsBad) _chip(Icons.ac_unit, widget.reportedBad > 0 ? '${widget.reportedBad}' : '!', text, color: widget.reportedBad > 0 ? Colors.redAccent : Colors.amberAccent),
+          if (widget.workZones > 0) _chip(Icons.construction, '${widget.workZones}', text, color: Colors.orange),
+        ],
+      );
+
+  Widget _chip(IconData icon, String label, TextTheme text, {Color? color}) => Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 18, color: color ?? Colors.white70),
+          const SizedBox(width: 3),
+          Text(label, style: text.bodyMedium?.copyWith(color: color, fontWeight: FontWeight.w600)),
+        ]),
+      );
+
+  Widget _full(Conditions c, WeatherAlert? worst, TextTheme text) {
+    final alerts = widget.alerts;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('${c.temperatureF}°F  ${c.shortForecast}', style: text.headlineSmall),
+        Text('Wind ${c.windDirection} ${c.windSpeed}'
+            '${c.precipChance != null ? '  ·  Precip ${c.precipChance}%' : ''}'
+            '${c.humidity != null ? '  ·  RH ${c.humidity}%' : ''}', style: text.bodyLarge),
+        if (worst != null) ...[
+          const SizedBox(height: 6),
+          Text('${alerts.length} alert${alerts.length == 1 ? '' : 's'} within ${radiusMiles.round()} mi',
+              style: text.labelLarge?.copyWith(color: _severityColor(worst.severity))),
+          Text(worst.title, style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ],
+        if (widget.reportedBad > 0 || widget.roadRisk != null || widget.workZones > 0) ...[
+          const SizedBox(height: 6),
+          if (widget.reportedBad > 0)
+            Text('Roads: ${widget.reportedBad} section${widget.reportedBad == 1 ? '' : 's'} reported snow/ice (IDOT)',
+                style: text.bodyMedium?.copyWith(color: Colors.redAccent)),
+          if (widget.roadRisk != null)
+            Text('Roads: ${widget.roadRisk} — estimate', style: text.bodyMedium?.copyWith(color: Colors.amberAccent)),
+          if (widget.workZones > 0)
+            Text('${widget.workZones} work zone${widget.workZones == 1 ? '' : 's'} within ${radiusMiles.round()} mi', style: text.bodySmall),
+        ],
+        if (widget.error != null) Text(widget.error!, style: text.bodySmall?.copyWith(color: Colors.orangeAccent)),
+      ],
+    );
+  }
+
   static int _rank(String s) => const {'Minor': 0, 'Moderate': 1, 'Severe': 2, 'Extreme': 3}[s] ?? 0;
+}
+
+IconData _skyIcon(String forecast) {
+  final f = forecast.toLowerCase();
+  if (f.contains('thunder')) return Icons.thunderstorm;
+  if (f.contains('snow') || f.contains('sleet') || f.contains('ice')) return Icons.ac_unit;
+  if (f.contains('rain') || f.contains('shower') || f.contains('drizzle')) return Icons.water_drop;
+  if (f.contains('fog') || f.contains('haze') || f.contains('smoke')) return Icons.foggy;
+  if (f.contains('cloud') || f.contains('overcast')) return Icons.cloud;
+  return Icons.wb_sunny;
 }
