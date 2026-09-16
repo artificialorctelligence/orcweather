@@ -19,7 +19,8 @@ const nwsHost = 'https://api.weather.gov';
 // USDOT Work Zone Data Exchange feed registry (Socrata JSON, no key).
 const wzdxRegistryUrl = 'https://datahub.transportation.gov/resource/69qe-yiui.json?\$limit=500';
 
-const radiusMiles = 50.0;
+const radiusMiles = 50.0; // data + circle
+const defaultViewMiles = 30.0; // what the recenter button fits on screen
 const metersPerMile = 1609.344;
 
 // Illinois DOT reported winter road conditions (ArcGIS FeatureServer layer, no key).

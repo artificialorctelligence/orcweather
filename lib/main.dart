@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'compass.dart';
 import 'config.dart';
 import 'idot.dart';
 import 'librewxr.dart';
@@ -47,7 +48,11 @@ class _MapScreenState extends State<MapScreen> {
   final _settings = Settings(SharedPreferencesAsync());
 
   LatLng? _position;
-  double _headingDeg = 0; // course over ground from GPS; meaningful only while moving
+  double _headingDeg = 0;
+  bool _moving = false; // GPS course wins while moving (car bodies skew the compass); compass when stopped
+  StreamSubscription<double>? _compassSub;
+  Timer? _attributionBanner;
+  bool _showAttribution = true; // OSMF guideline: visible at first, collapses to (i) after 5 s
   RadarFrame? _radar;
   List<WeatherAlert> _alerts = const [];
   Conditions? _conditions;
@@ -70,12 +75,18 @@ class _MapScreenState extends State<MapScreen> {
     _settings.addListener(() => setState(() {}));
     _settings.load();
     _startLocation();
+    _compassSub = Compass().headings.listen((h) {
+      if (!_moving) setState(() => _headingDeg = h);
+    });
+    _attributionBanner = Timer(const Duration(seconds: 5), () => setState(() => _showAttribution = false));
     _refresh = Timer.periodic(_refreshEvery, (_) => _refreshWeather());
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
+    _compassSub?.cancel();
+    _attributionBanner?.cancel();
     _refresh?.cancel();
     _client.close();
     _settings.dispose();
@@ -97,7 +108,8 @@ class _MapScreenState extends State<MapScreen> {
       final first = _position == null;
       setState(() {
         _position = LatLng(p.latitude, p.longitude);
-        if (p.heading >= 0 && p.speed > 1) _headingDeg = p.heading; // ponytail: GPS course only; compass when standing still needs a sensor plugin
+        _moving = p.speed > 2 && p.heading >= 0; // ~4.5 mph
+        if (_moving) _headingDeg = p.heading;
       });
       if (first) {
         _fitRadius();
@@ -142,14 +154,15 @@ class _MapScreenState extends State<MapScreen> {
     if (mounted) setState(() { _workZones = zones; _roads = roads; });
   }
 
-  /// Zoom so the 50-mile circle fills the short side of the screen.
+  /// Zoom so [defaultViewMiles] around the position fills the short side of the screen.
   void _fitRadius() {
     final here = _position;
     if (here == null) return;
     const d = Distance();
+    const view = defaultViewMiles * metersPerMile;
     final bounds = LatLngBounds(
-      d.offset(here, _radiusMeters, 315),
-      d.offset(here, _radiusMeters, 135),
+      d.offset(here, view, 315),
+      d.offset(here, view, 135),
     );
     _map.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(16)));
     _followPosition = true;
@@ -226,29 +239,40 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ]),
               ],
-              RichAttributionWidget(
-                alignment: AttributionAlignment.bottomRight,
-                popupInitialDisplayDuration: const Duration(seconds: 5),
-                attributions: [
-                  TextSourceAttribution(baseAttribution, onTap: () => launchUrl(Uri.parse('https://openstreetmap.org/copyright'))),
-                  TextSourceAttribution(librewxrAttribution, onTap: () => launchUrl(Uri.parse('https://librewxr.net'))),
-                  const TextSourceAttribution('Precipitation data from NOAA Enterprise Rain Rate (RRQPE)'),
-                  const TextSourceAttribution('Conditions and warnings from the US National Weather Service'),
-                  const TextSourceAttribution('Road conditions from Illinois DOT; work zones via USDOT WZDx'),
-                  const TextSourceAttribution('Not an official warning source. Estimates are marked as such.', prependCopyright: false),
-                ],
-              ),
             ],
           ),
           SafeArea(
             child: Align(
               alignment: Alignment.bottomRight,
               child: Padding(
-                padding: const EdgeInsets.only(right: 44, bottom: 4),
-                child: IconButton.filledTonal(
-                  tooltip: 'Settings',
-                  icon: const Icon(Icons.settings),
-                  onPressed: () => showDialog<void>(context: context, builder: (_) => _SettingsDialog(settings: _settings)),
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (_showAttribution)
+                      Card(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        color: Colors.black.withValues(alpha: 0.7),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          child: Text('$baseAttribution · $librewxrAttribution · NWS', style: Theme.of(context).textTheme.bodySmall),
+                        ),
+                      ),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton.filledTonal(
+                        tooltip: 'Settings',
+                        icon: const Icon(Icons.settings),
+                        onPressed: () => showDialog<void>(context: context, builder: (_) => _SettingsDialog(settings: _settings)),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton.filledTonal(
+                        tooltip: 'Data sources',
+                        icon: const Icon(Icons.info_outline),
+                        onPressed: () => showDialog<void>(context: context, builder: (_) => const _SourcesDialog()),
+                      ),
+                    ]),
+                  ],
                 ),
               ),
             ),
@@ -430,6 +454,33 @@ const _darkTiles = <double>[
   -0.2126, -0.7152, -0.0722, 0, 255,
   0, 0, 0, 1, 0,
 ];
+
+class _SourcesDialog extends StatelessWidget {
+  const _SourcesDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget link(String text, String url) => TextButton(
+        style: TextButton.styleFrom(padding: EdgeInsets.zero, alignment: Alignment.centerLeft),
+        onPressed: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+        child: Text(text));
+    final small = Theme.of(context).textTheme.bodyMedium;
+    return AlertDialog(
+      title: const Text('Data sources'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        link('Map data $baseAttribution (ODbL)', 'https://openstreetmap.org/copyright'),
+        link(librewxrAttribution, 'https://librewxr.net'),
+        Text('Precipitation data from NOAA Enterprise Rain Rate (RRQPE)', style: small),
+        link('Conditions and warnings: US National Weather Service', 'https://www.weather.gov'),
+        Text('Road conditions: Illinois DOT · Work zones: USDOT WZDx', style: small),
+        link('Map widget: flutter_map', 'https://github.com/fleaflet/flutter_map'),
+        const SizedBox(height: 10),
+        Text('Not an official warning source. Estimates are marked as such.', style: small?.copyWith(color: Colors.amberAccent)),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],
+    );
+  }
+}
 
 class _SettingsDialog extends StatelessWidget {
   const _SettingsDialog({required this.settings});
