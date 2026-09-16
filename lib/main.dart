@@ -14,6 +14,7 @@ import 'config.dart';
 import 'idot.dart';
 import 'librewxr.dart';
 import 'nws.dart';
+import 'nws_colors.dart';
 import 'road_risk.dart';
 import 'settings.dart';
 import 'wzdx.dart';
@@ -46,6 +47,7 @@ class _MapScreenState extends State<MapScreen> {
   late final _wzdx = Wzdx(_client);
   late final _idot = Idot(_client);
   final _settings = Settings(SharedPreferencesAsync());
+  final _alertHits = LayerHitNotifier<WeatherAlert>(null);
 
   LatLng? _position;
   double _headingDeg = 0;
@@ -170,6 +172,24 @@ class _MapScreenState extends State<MapScreen> {
 
   void _zoomBy(double delta) => _map.move(_map.camera.center, _map.camera.zoom + delta);
 
+  /// Every alert under the tap, most urgent first (NWS priority, then CAP severity).
+  void _showAlerts(List<WeatherAlert> hits) {
+    final seen = <WeatherAlert>{};
+    final list = hits.where(seen.add).toList()
+      ..sort((a, b) => hazardPriority(a.event).compareTo(hazardPriority(b.event)));
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => ListView.separated(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        itemCount: list.length,
+        separatorBuilder: (_, _) => const Divider(height: 24),
+        itemBuilder: (context, i) => _AlertTile(alert: list[i]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final here = _position;
@@ -198,16 +218,28 @@ class _MapScreenState extends State<MapScreen> {
                   opacity: 0.6,
                   child: TileLayer(urlTemplate: _radar!.tileUrl(librewxrHost), userAgentPackageName: applicationId),
                 ),
-              PolygonLayer(polygons: [
-                for (final a in _alerts)
-                  for (final ring in a.polygons)
-                    Polygon(
-                      points: ring,
-                      color: _severityColor(a.severity).withValues(alpha: 0.15),
-                      borderColor: _severityColor(a.severity),
-                      borderStrokeWidth: 2,
-                    ),
-              ]),
+              GestureDetector(
+                onTap: () {
+                  final hits = _alertHits.value?.hitValues;
+                  if (hits != null && hits.isNotEmpty) _showAlerts(hits);
+                },
+                child: PolygonLayer(
+                  hitNotifier: _alertHits,
+                  polygons: [
+                    for (final a in _alerts)
+                      for (final ring in a.polygons)
+                        Polygon(
+                          points: ring,
+                          hitValue: a,
+                          color: kindOf(a.event) == HazardKind.warning
+                              ? hazardColor(a.event, a.severity).withValues(alpha: 0.2)
+                              : Colors.transparent,
+                          borderColor: hazardColor(a.event, a.severity),
+                          borderStrokeWidth: kindOf(a.event) == HazardKind.other ? 1.5 : 2.5,
+                        ),
+                  ],
+                ),
+              ),
               PolylineLayer(polylines: [
                 for (final r in _roads)
                   if (!r.isClear)
@@ -315,13 +347,6 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-Color _severityColor(String severity) => switch (severity) {
-      'Extreme' => Colors.purpleAccent,
-      'Severe' => Colors.redAccent,
-      'Moderate' => Colors.orangeAccent,
-      _ => Colors.yellowAccent,
-    };
-
 Color _conditionColor(String condition) => switch (condition) {
       'Covered with ice or snow' => Colors.deepPurpleAccent,
       'Mostly Covered with ice or snow' => Colors.redAccent,
@@ -371,7 +396,7 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
   Widget build(BuildContext context) {
     final c = widget.conditions;
     final alerts = widget.alerts;
-    final worst = alerts.isEmpty ? null : alerts.reduce((a, b) => _rank(a.severity) >= _rank(b.severity) ? a : b);
+    final worst = alerts.isEmpty ? null : alerts.reduce((a, b) => hazardPriority(a.event) <= hazardPriority(b.event) ? a : b);
     final text = Theme.of(context).textTheme;
     final roadsBad = widget.reportedBad > 0 || widget.roadRisk != null;
     return GestureDetector(
@@ -398,7 +423,7 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
           _chip(_skyIcon(c.shortForecast), widget.settings.formatTemp(c.temperatureF), text),
           _chip(Icons.air, '${c.windDirection} ${c.windSpeed.replaceAll(' mph', '')}', text),
           if ((c.precipChance ?? 0) > 0) _chip(Icons.umbrella, '${c.precipChance}%', text),
-          if (worst != null) _chip(Icons.warning_amber, '${widget.alerts.length}', text, color: _severityColor(worst.severity)),
+          if (worst != null) _chip(Icons.warning_amber, '${widget.alerts.length}', text, color: hazardColor(worst.event, worst.severity)),
           if (roadsBad) _chip(Icons.ac_unit, widget.reportedBad > 0 ? '${widget.reportedBad}' : '!', text, color: widget.reportedBad > 0 ? Colors.redAccent : Colors.amberAccent),
           if (widget.workZones > 0) _chip(Icons.construction, '${widget.workZones}', text, color: Colors.orange),
         ],
@@ -426,8 +451,8 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
         if (worst != null) ...[
           const SizedBox(height: 6),
           Text('${alerts.length} alert${alerts.length == 1 ? '' : 's'} within ${radiusMiles.round()} mi',
-              style: text.labelLarge?.copyWith(color: _severityColor(worst.severity))),
-          Text(worst.title, style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
+              style: text.labelLarge?.copyWith(color: hazardColor(worst.event, worst.severity))),
+          Text(worst.event, style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
         ],
         if (widget.reportedBad > 0 || widget.roadRisk != null || widget.workZones > 0) ...[
           const SizedBox(height: 6),
@@ -443,8 +468,36 @@ class _ConditionsPanelState extends State<_ConditionsPanel> {
       ],
     );
   }
+}
 
-  static int _rank(String s) => const {'Minor': 0, 'Moderate': 1, 'Severe': 2, 'Extreme': 3}[s] ?? 0;
+class _AlertTile extends StatelessWidget {
+  const _AlertTile({required this.alert});
+  final WeatherAlert alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final color = hazardColor(alert.event, alert.severity);
+    final kind = switch (kindOf(alert.event)) { HazardKind.warning => 'Warning', HazardKind.watch => 'Watch', HazardKind.other => alert.severity };
+    final until = TimeOfDay.fromDateTime(alert.expires.toLocal()).format(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(width: 14, height: 14, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(alert.event, style: text.titleMedium)),
+        Text('$kind · until $until', style: text.labelMedium),
+      ]),
+      const SizedBox(height: 6),
+      Text(_brief(alert.description), style: text.bodyMedium, maxLines: 6, overflow: TextOverflow.ellipsis),
+    ]);
+  }
+
+  /// First readable chunk of a CAP description: drop the product code line and collapse whitespace.
+  static String _brief(String d) {
+    final lines = d.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+    if (lines.isNotEmpty && RegExp(r'^[A-Z]{3,6}\s*$').hasMatch(lines.first)) lines.removeAt(0);
+    return lines.join(' ').replaceAll(RegExp(r'\s+'), ' ');
+  }
 }
 
 /// Inverted grayscale: dark ground, light roads, no orange water. Base tiles only.

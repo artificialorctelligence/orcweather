@@ -53,6 +53,12 @@ class WeatherAlert {
   final String description;
   final List<List<LatLng>> polygons; // outer rings only
 
+  /// "Severe Thunderstorm Warning" from an NWS title; WMO titles as-is.
+  String get event {
+    final i = title.indexOf(' issued ');
+    return (i > 0 ? title.substring(0, i) : title).trim();
+  }
+
   static List<WeatherAlert> parse(String body) {
     final json = jsonDecode(body) as Map<String, dynamic>;
     return (json['features'] as List).map((f) {

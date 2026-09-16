@@ -1,9 +1,11 @@
+import 'package:flutter/material.dart' show Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:orcweather/config.dart';
 import 'package:orcweather/librewxr.dart';
+import 'package:orcweather/nws_colors.dart';
 
 // Shapes copied from live api.librewxr.net responses on 2026-09-14.
 const weatherMaps = '''
@@ -61,6 +63,22 @@ void main() {
     expect(b[2], greaterThan(-97.5)); // east
     expect(b[3], greaterThan(35.5)); // north
     expect(b[3] - b[1], closeTo(1.45, 0.05)); // ~50 mi each way in degrees latitude
+  });
+
+  test('event name and kind from titles; NWS colours', () {
+    expect(eventOf('Severe Thunderstorm Warning issued September 15 at 10:27PM EDT until 10:45PM EDT by NWS Northern Indiana'), 'Severe Thunderstorm Warning');
+    expect(eventOf('yellow advisory - frost - in effect'), 'yellow advisory - frost - in effect');
+    expect(kindOf('Tornado Watch'), HazardKind.watch);
+    expect(kindOf('Flash Flood Warning'), HazardKind.warning);
+    expect(kindOf('Heat Advisory'), HazardKind.other);
+    expect(hazardColor('Tornado Warning', 'Extreme'), const Color(0xFFFF0000));
+    expect(hazardColor('Severe Thunderstorm Warning', 'Severe'), const Color(0xFFFFA500));
+    expect(hazardColor('Tornado Watch', 'Severe'), const Color(0xFFFFFF00));
+    expect(hazardColor('Winter Storm Warning', 'Severe'), const Color(0xFFFF69B4));
+    expect(hazardColor('yellow advisory - frost - in effect', 'Moderate'), severityFallback('Moderate'));
+    expect(hazardPriority('Tornado Warning'), lessThan(hazardPriority('Severe Thunderstorm Warning')));
+    expect(hazardPriority('Severe Thunderstorm Warning'), lessThan(hazardPriority('Flood Watch')));
+    expect(WeatherAlert.parse(alerts).first.event, 'Severe Thunderstorm Warning');
   });
 
   test('non-200 throws', () {
