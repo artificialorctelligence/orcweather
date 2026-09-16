@@ -78,3 +78,19 @@ API to control another app's playback — `MPMusicPlayerController.systemMusicPl
 only Apple Music — so the iPhone version likely cannot do this at all, and the writeup must say
 so rather than promise it. Either way it is a small platform-channel plugin in
 `android/app/src/main/kotlin/`, no Dart package needed unless one exists and is current.
+
+## #8: Keep tracking and warning while backgrounded or screen locked
+
+Asked 2026-09-15 after confirming the map follows the car. Today the geolocator stream and the
+5-minute weather refresh only run while the app is in the foreground with the screen on; lock
+the phone or switch apps and position, alerts and radar stop updating, so a new warning that
+arrives while Spotify is in front is never noticed. Consequence: the app is only a "screen on,
+app in front" tool.
+
+What it takes: Android foreground service with a persistent notification (geolocator supports
+`foregroundNotificationConfig` in `AndroidSettings`; needs `FOREGROUND_SERVICE_LOCATION` and
+`ACCESS_BACKGROUND_LOCATION` handling and Play's background-location policy declaration), the
+alert check moved into that service's tick, and a local notification (`flutter_local_notifications`,
+per stack-flutter) when a warning polygon newly contains the position. iOS: "Always" location
+plus background modes, reviewed by Apple. Battery and Play review are the costs; do it after the
+foreground app is solid.
