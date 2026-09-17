@@ -19,13 +19,30 @@ Requested at kickoff (2026-09-14): zoom by voice as well as buttons. Deferred un
 on a phone. Plan: `speech_to_text` 7.5.0 feeding the same `_zoomBy`/`_fitRadius` functions in
 `lib/main.dart`; nothing else changes. Consequence of not doing it: hands-on-screen zoom only.
 
-## #3: Android Auto: MapWithContentTemplate + Flutter map on the car surface unproven
+## #3: Android Auto: MapWithContentTemplate + Flutter map on the car surface unproven (RESOLVED 2026-09-16)
 
 Research (docs/orclab-research/car-android-auto, 2026-09-14) found the documented path —
 VirtualDisplay + Presentation hosting a second FlutterEngine on the car Surface — but no package
 does it and Orclab has never run it. Consequence: the AA milestone carries a real spike before
 any feature work; WE-2/WE-5 quality rules also constrain legend colours and annotation count.
 Needs the Desktop Head Unit to test. Not started.
+
+**Resolved for real, not just tracked** (2026-09-16, on the Desktop Head Unit against direflail's
+Pixel 9 Pro XL): the documented path works. `FlutterSurface` (android/…/car/) creates a
+VirtualDisplay over the car `Surface`, a `Presentation` on it, a `FlutterView` attached to a
+second `FlutterEngine` running Dart entrypoint `carMain`; the phone log shows the virtual
+display `orcweather-car` 800×400 created and the host accepting our `MapWithContentTemplate`.
+Seen on the head unit: position, radar, circle; `+`/`−`/recenter actions reach Dart over
+`MethodChannel('orcweather/car')`; host drag/scale gestures arrive via `SurfaceCallback` once
+`Action.PAN` is in the map action strip (without it the host delivers none — reference doc, and
+it silently dropped our fourth action too) and move the flutter_map. Conditions flow Dart →
+Kotlin into a one-row pane. Gotchas that cost time: the DHU needs `libc++1`, working GLX (an
+apt NVIDIA update had left kernel module 595.84 vs libraries 595.91 — reboot fixed it), the phone
+unlocked on its home screen for Android Auto's first-connection setup (`PROJECTION_NOT_STARTED`
+otherwise), and Android Auto developer settings under Settings → Connected devices → Android
+Auto (tap "Version and permission info" 10×; Unknown sources on; Start head unit server).
+Remaining Android Auto work is a new entry, not a spike.
+
 
 ## #4: CarPlay: only a WidgetKit widget / Live Activity is possible; needs a Mac
 
@@ -200,3 +217,25 @@ in main.dart 58 → 33, map_logic 8 → 3, road_risk 2 → 0. The remaining ones
 −0). Coverage unchanged at 92%. Hand check: raising the drag threshold 24 → 240 px made the
 drag widget test fail before revert.
 
+## #13: Android Auto: from working spike to shippable
+
+Spike #3 proved the Flutter map renders and responds on the car screen (2026-09-16). What is
+left before it could pass Google's car review or be used daily:
+
+- `OrcCarAppService.createHostValidator()` returns ALLOW_ALL_HOSTS_VALIDATOR for the DHU;
+  release builds must use the Car App Library's `hosts_allowlist_sample` (or a stricter list).
+- Engine reuse: the car engine is created per connection and destroyed on surface loss; the
+  phone engine is separate, so the car fetches its own weather (double requests when both run).
+  Share via `FlutterEngineCache` or hand data across.
+- Gestures: fling is one jump; scale maps host scaleFactor straight to zoom; pan turns following
+  off with no car-side indication. Tune against a real head unit.
+- Dark theme: MR-1 says follow the host; the Presentation's uiMode is believed to track the
+  car's night mode but was not verified on the DHU (run with `-c config/default_sensors.ini` /
+  night toggle and check the map filter flips).
+- WE-2 legend rule: the radar colour scale is one legend (many colours allowed); adding a
+  second legend caps every legend at three colours — decide before adding any.
+- Play: opt the app into the Android Auto form factor in Play Console and pass the car quality
+  review (WE-1…WE-5, MR-1); debug-signed builds only appear on the head unit with Unknown
+  sources on.
+- Alerts on the car: tapping polygons is phone-only; a car-safe equivalent is a row per alert
+  in the pane (max five annotation types on the map, WE-5).

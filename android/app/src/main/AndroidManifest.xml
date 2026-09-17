@@ -2,10 +2,26 @@
         <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Android Auto: weather apps draw their own map in MapWithContentTemplate (MAP_TEMPLATES, never
+         together with NAVIGATION_TEMPLATES) and need ACCESS_SURFACE to be handed the car surface. -->
+    <uses-permission android:name="androidx.car.app.MAP_TEMPLATES"/>
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE"/>
     <application
         android:label="orcweather"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Android Auto -->
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="7"/>
+        <service
+            android:name=".car.OrcCarAppService"
+            android:exported="true"
+            android:label="orcweather">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService"/>
+                <category android:name="androidx.car.app.category.WEATHER"/>
+            </intent-filter>
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true"

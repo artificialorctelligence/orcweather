@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -23,21 +24,30 @@ import 'wzdx.dart';
 
 void main() => runApp(const OrcWeatherApp());
 
+/// Android Auto: a second Flutter engine runs this on the car's map surface (see
+/// android/.../car/FlutterSurface.kt). Map only — the car host draws the pane and buttons.
+@pragma('vm:entry-point')
+void carMain() => runApp(const OrcWeatherApp(car: true));
+
 class OrcWeatherApp extends StatelessWidget {
-  const OrcWeatherApp({super.key});
+  const OrcWeatherApp({super.key, this.car = false});
+  final bool car;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'orcweather',
         theme: ThemeData(colorSchemeSeed: Colors.blueGrey, brightness: Brightness.dark),
-        home: const MapScreen(),
+        home: MapScreen(car: car),
       );
 }
 
 class MapScreen extends StatefulWidget {
   /// Everything that leaves the process can be injected, so a widget test runs with fakes.
-  const MapScreen({super.key, this.client, this.positions, this.headings, this.tileProvider});
+  const MapScreen({super.key, this.client, this.positions, this.headings, this.tileProvider, this.car = false});
   final http.Client? client;
+  /// On the car screen: no phone chrome, no touch handling (the host owns input), zoom and
+  /// conditions go over [carChannel].
+  final bool car;
   final Stream<Position>? positions;
   final Stream<double>? headings;
   final TileProvider? tileProvider;
@@ -55,6 +65,7 @@ class _MapScreenState extends State<MapScreen> {
   late final _idot = Idot(_client);
   final _settings = Settings(SharedPreferencesAsync());
   final _alertHits = LayerHitNotifier<WeatherAlert>(null);
+  static const carChannel = MethodChannel('orcweather/car');
 
   LatLng? _position;
   double _headingDeg = 0;
@@ -94,6 +105,27 @@ class _MapScreenState extends State<MapScreen> {
       if (!_moving) setState(() => _headingDeg = h);
     });
     _attributionBanner = Timer(const Duration(seconds: 5), () => setState(() => _showAttribution = false));
+    if (widget.car) {
+      carChannel.setMethodCallHandler((call) async {
+        switch (call.method) {
+          case 'zoom':
+            _zoomBy((call.arguments as num).toDouble());
+          case 'recenter':
+            _fitRadius();
+          case 'panMode':
+            if (call.arguments == false && _settings.centerOnZoom) _fitRadius();
+          case 'pan':
+            // Host scroll distances are in surface pixels; move the centre by that much.
+            final d = (call.arguments as List).cast<num>();
+            final cam = _map.camera;
+            final centerPx = cam.latLngToScreenOffset(cam.center);
+            _followPosition = false;
+            _map.move(cam.screenOffsetToLatLng(centerPx + Offset(d[0].toDouble(), d[1].toDouble())), cam.zoom);
+          case 'scale':
+            _map.move(_map.camera.center, _map.camera.zoom + math.log((call.arguments as num).toDouble()) / math.ln2);
+        }
+      });
+    }
     _refresh = Timer.periodic(_refreshEvery, (_) => _refreshWeather());
   }
 
@@ -162,9 +194,25 @@ class _MapScreenState extends State<MapScreen> {
         _error = null;
       });
       await _refreshRoads(here, _conditions?.state);
+      if (widget.car) _pushCarConditions();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
+  }
+
+  /// What the car's native pane shows beside the map.
+  void _pushCarConditions() {
+    final c = _conditions;
+    final worst = worstAlert(_alerts);
+    final bad = _roads.where((r) => !r.isClear).length;
+    final risk = roadRisk(c, _alerts);
+    carChannel.invokeMethod('conditions', {
+      'temp': c == null ? null : _settings.formatTemp(c.temperatureF),
+      'sky': c?.shortForecast,
+      'wind': c == null ? null : '${c.windDirection} ${c.windSpeed}',
+      'alert': worst == null ? null : '${_alerts.length} alert${_alerts.length == 1 ? '' : 's'}: ${worst.event}',
+      'roads': bad > 0 ? '$bad road section${bad == 1 ? '' : 's'} with snow/ice (IDOT)' : (risk == null ? null : 'Roads: $risk (estimate)'),
+    });
   }
 
   /// Road layers are statewide downloads (up to ~10 MB): only on state change or every 30 min.
@@ -275,8 +323,10 @@ class _MapScreenState extends State<MapScreen> {
             options: MapOptions(
               initialCenter: here ?? const LatLng(39.5, -98.35),
               initialZoom: here == null ? 4 : 8,
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate & ~InteractiveFlag.doubleTapZoom & ~InteractiveFlag.doubleTapDragZoom,
+              interactionOptions: InteractionOptions(
+                flags: widget.car
+                    ? InteractiveFlag.none
+                    : InteractiveFlag.all & ~InteractiveFlag.rotate & ~InteractiveFlag.doubleTapZoom & ~InteractiveFlag.doubleTapDragZoom,
               ),
               onPositionChanged: (camera, hasGesture) {
                 if (hasGesture && (camera.zoom - _lastGestureZoom).abs() > 0.05) {
@@ -353,6 +403,13 @@ class _MapScreenState extends State<MapScreen> {
               ],
             ],
           ),
+          if (!widget.car) ..._phoneChrome(context),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _phoneChrome(BuildContext context) => [
           if (_zoomBadge != null)
             SafeArea(
               child: Align(
@@ -437,10 +494,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ];
 }
 
 Color _conditionColor(String condition) => switch (condition) {
