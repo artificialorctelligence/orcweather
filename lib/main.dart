@@ -111,7 +111,6 @@ class _MapScreenState extends State<MapScreen> {
     });
     _attributionBanner = Timer(const Duration(seconds: 5), () => setState(() => _showAttribution = false));
     if (widget.car) {
-      _collapseAttributionLater();
       carChannel.setMethodCallHandler((call) async {
         switch (call.method) {
           case 'zoom':
@@ -295,7 +294,9 @@ class _MapScreenState extends State<MapScreen> {
     if (e is MapEventNonRotatedSizeChange && e.oldCamera.nonRotatedSize.shortestSide < 1 && e.camera.nonRotatedSize.shortestSide >= 1) {
       // The car surface just gave the headless map its first real size. This event fires during
       // layout; moving the camera inside it corrupts the camera, so fit on the next turn.
+      // The attribution's 5 s also start now — the map is only visible from here.
       Future<void>(() { if (mounted) _fitRadius(); });
+      if (widget.car) _collapseAttributionLater();
       return;
     }
     if (e is MapEventMoveStart && e.source != MapEventSource.mapController) {
