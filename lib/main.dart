@@ -74,6 +74,8 @@ class _MapScreenState extends State<MapScreen> {
   Timer? _attributionBanner;
   Timer? _zoomBadgeTimer;
   Timer? _carRecenter; // car: follow again 15 s after the last pan/zoom gesture
+  Timer? _carAttribTimer;
+  bool _carAttribExpanded = true; // full licence line for 5 s, then an (i) chip; a tap on the chip re-expands
   String? _zoomBadge; // shown for a moment after the zoom changes
   double _lastGestureZoom = 0;
   double? _zoomAtGestureStart;
@@ -109,6 +111,7 @@ class _MapScreenState extends State<MapScreen> {
     });
     _attributionBanner = Timer(const Duration(seconds: 5), () => setState(() => _showAttribution = false));
     if (widget.car) {
+      _collapseAttributionLater();
       carChannel.setMethodCallHandler((call) async {
         switch (call.method) {
           case 'zoom':
@@ -133,6 +136,13 @@ class _MapScreenState extends State<MapScreen> {
             _carRecenterLater();
           case 'tap':
             final xy = (call.arguments as List).cast<num>();
+            final size = _map.camera.nonRotatedSize;
+            if (xy[0] < 56 && xy[1] > size.height - 56) {
+              // The (i) chip in the corner: show the licence line again.
+              setState(() => _carAttribExpanded = true);
+              _collapseAttributionLater();
+              return;
+            }
             final hits = alertsAt(_map.camera.screenOffsetToLatLng(Offset(xy[0].toDouble(), xy[1].toDouble())), _alerts);
             debugPrint('orcweather car tap at $xy: ${hits.length} alert(s)');
             if (hits.isNotEmpty) {
@@ -155,6 +165,7 @@ class _MapScreenState extends State<MapScreen> {
     _attributionBanner?.cancel();
     _zoomBadgeTimer?.cancel();
     _carRecenter?.cancel();
+    _carAttribTimer?.cancel();
     _refresh?.cancel();
     _client.close();
     _settings.dispose();
@@ -218,6 +229,13 @@ class _MapScreenState extends State<MapScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
+  }
+
+  void _collapseAttributionLater() {
+    _carAttribTimer?.cancel();
+    _carAttribTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _carAttribExpanded = false);
+    });
   }
 
   /// No recenter button on the car (four strip slots: pan, speak, +, −): come home on our own.
@@ -458,10 +476,12 @@ class _MapScreenState extends State<MapScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(4)),
-                child: Text(
-                  '$baseAttribution · $librewxrAttribution · NWS · IDOT · NOAA RRQPE',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
+                child: _carAttribExpanded
+                    ? Text(
+                        '$baseAttribution · $librewxrAttribution · NWS · IDOT · NOAA RRQPE',
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      )
+                    : const Icon(Icons.info_outline, size: 18, color: Colors.white),
               ),
             ),
         ],
