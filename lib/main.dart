@@ -449,6 +449,21 @@ class _MapScreenState extends State<MapScreen> {
             ],
           ),
           if (!widget.car) ..._phoneChrome(context),
+          if (widget.car)
+            // Licence attribution lives on the map surface itself: the host's card text truncates,
+            // and OSM/LibreWXR both require it readable. Bottom-left, clear of the host's strip.
+            Positioned(
+              left: 8,
+              bottom: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(4)),
+                child: Text(
+                  '$baseAttribution · $librewxrAttribution · NWS · IDOT · NOAA RRQPE',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ),
         ],
       ),
     );
