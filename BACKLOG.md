@@ -150,6 +150,20 @@ and LibreWXR directly under one User-Agent, which is how an app gets blocked.
 **Update 2026-09-15:** first concrete consumer is lightning (#11) — the proxy owns the GOES GLM
 poller and the `/lightning` endpoint; nothing else in the app can provide it.
 
+**Update 2026-09-17:** the server is **DreamHost**, and direflail wants to set it up with Python
+next so the APIs can be hooked up through it. What to settle when starting (not researched yet;
+verify against DreamHost's current docs under currency-discipline): DreamHost *shared* hosting
+runs Python web apps through Passenger (WSGI) — fine for a FastAPI/Flask proxy via a WSGI
+adapter and for cron every minute, but it cannot keep a daemon alive, and the GLM lightning
+poller (#11) needs a process that wakes every 20 s. A DreamHost VPS (or DreamCompute) runs
+uvicorn + the poller as systemd services. So: shared = proxy + keys + tile/API caching now,
+lightning later or via a 1-minute cron with three fetches per run; VPS = everything. Steps once
+the tier is chosen: Python version available on the host, a virtualenv, the app under the
+domain (Passenger `passenger_wsgi.py` or a systemd unit), HTTPS (DreamHost issues Let's Encrypt),
+secrets in an env file outside the web root (secret-hygiene), then point `lib/config.dart` hosts
+at it. Route list is in the original entry above.
+
+
 ## #11: Lightning layer from NOAA GLM via the proxy, with a settings toggle
 
 Asked 2026-09-15. Research the same day (`docs/research/source-lightning.md`): Blitzortung forbids it
