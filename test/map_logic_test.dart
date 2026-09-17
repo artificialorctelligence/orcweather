@@ -141,4 +141,59 @@ void main() {
       expect(b.center.latitude, closeTo(40.69, 0.01));
     });
   });
+
+  carTests();
+}
+
+void carTests() {
+  group('alertsAt / pointInRing', () {
+    final box = [const LatLng(40.3, -90.2), const LatLng(40.3, -89.0), const LatLng(41.1, -89.0), const LatLng(41.1, -90.2), const LatLng(40.3, -90.2)];
+    test('inside, outside, and an open ring (no repeated first point)', () {
+      expect(pointInRing(const LatLng(40.69, -89.59), box), isTrue);
+      expect(pointInRing(const LatLng(42.0, -89.59), box), isFalse);
+      expect(pointInRing(const LatLng(40.69, -89.59), box.sublist(0, 4)), isTrue);
+    });
+    test('returns containing alerts, most urgent first', () {
+      final watch = WeatherAlert(title: 'Flood Watch issued today by NWS X', severity: 'Moderate', expires: DateTime(2030), description: '', polygons: [box]);
+      final warn = WeatherAlert(title: 'Tornado Warning issued today by NWS X', severity: 'Extreme', expires: DateTime(2030), description: '', polygons: [box]);
+      final far = WeatherAlert(title: 'Heat Advisory issued today by NWS X', severity: 'Minor', expires: DateTime(2030), description: '',
+          polygons: [[const LatLng(30, -90), const LatLng(30, -89), const LatLng(31, -89), const LatLng(30, -90)]]);
+      final hits = alertsAt(const LatLng(40.69, -89.59), [watch, far, warn]);
+      expect(hits.map((a) => a.event), ['Tornado Warning', 'Flood Watch']);
+    });
+  });
+
+  group('car text', () {
+    test('strip line', () {
+      expect(stripLine(temp: null, sky: null, wind: null), 'Locating…');
+      expect(stripLine(temp: '71°F', sky: 'Slight Chance Showers And Thunderstorms', wind: 'S 17 mph', alerts: 2, roadRisk: 'Wet roads likely', workZones: 3),
+          '71°F ⛈ · S 17 · ⚠ 2 · 💧 · 🚧 3');
+      expect(stripLine(temp: '28°F', sky: 'Light Snow', wind: null, badRoads: 4, roadRisk: 'Ice risk (≤34°F with precipitation)'), '28°F ❄ · ❄ 4');
+      expect(stripLine(temp: '30°F', sky: 'Sunny', wind: null, roadRisk: 'Ice risk (alert)'), '30°F ☀ · 🧊');
+      expect(roadRiskGlyph('Flooding risk (alert)'), '🌊');
+      expect(roadRiskGlyph('Low visibility (alert)'), '🌫');
+      expect(nextCarViewMiles(30), 60);
+      expect(nextCarViewMiles(120), 30);
+      expect(nextCarViewMiles(45), 30, reason: 'unknown current → back to the closest view');
+      expect(stripLine(temp: '71°F', sky: 'Sunny', wind: 'N 5 mph'), '71°F ☀ · N 5');
+    });
+    test('spoken conditions reads units and directions aloud', () {
+      final a = WeatherAlert(title: 'Flood Watch issued today by NWS X', severity: 'Moderate', expires: DateTime(2030), description: '', polygons: const []);
+      expect(spokenConditions(temp: '71°F', sky: 'Slight Chance Showers', wind: 'SW 17 mph', alerts: [a], roads: 'roads: Wet roads likely (estimate)'),
+          '71 degrees. Slight Chance Showers. wind southwest 17 miles per hour. one alert: Flood Watch. roads: Wet roads likely estimated.');
+      final t = WeatherAlert(title: 'Tornado Warning issued today by NWS X', severity: 'Extreme', expires: DateTime(2030), description: '', polygons: const []);
+      expect(spokenConditions(temp: '71°F', sky: null, wind: null, alerts: [a, t]), '71 degrees. 2 alerts: Tornado Warning, Flood Watch.');
+      expect(spokenConditions(temp: null, sky: null, wind: null, alerts: const []), 'Still locating you.');
+    });
+    test('spoken alert: event, expiry, first sentence only', () {
+      final a = WeatherAlert(title: 'Severe Thunderstorm Warning issued today by NWS X', severity: 'Severe', expires: DateTime(2030),
+          description: 'SVRILX\n\n* At 615 PM CDT, a severe thunderstorm was located near Elmwood, moving east at 40 mph. HAZARD...60 mph wind gusts.', polygons: const []);
+      expect(spokenAlert(a, until: '7:00 PM'), 'Severe Thunderstorm Warning, until 7:00 PM. At 615 PM CDT, a severe thunderstorm was located near Elmwood, moving east at 40 mph.');
+    });
+    test('spoken alert: NWS WHAT bullet wins over the first sentence', () {
+      final a = WeatherAlert(title: 'Flood Watch issued today by NWS Lincoln IL', severity: 'Moderate', expires: DateTime(2030),
+          description: '* WHAT...Flooding caused by excessive rainfall continues to be possible.\n\n* WHERE...Portions of central Illinois.\n\n* WHEN...Through Wednesday morning.', polygons: const []);
+      expect(spokenAlert(a, until: '10:00 AM'), 'Flood Watch, until 10:00 AM. Flooding caused by excessive rainfall continues to be possible.');
+    });
+  });
 }

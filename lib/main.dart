@@ -73,6 +73,7 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<double>? _compassSub;
   Timer? _attributionBanner;
   Timer? _zoomBadgeTimer;
+  Timer? _carRecenter; // car: follow again 15 s after the last pan/zoom gesture
   String? _zoomBadge; // shown for a moment after the zoom changes
   double _lastGestureZoom = 0;
   double? _zoomAtGestureStart;
@@ -90,6 +91,8 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<Position>? _positionSub;
   Timer? _refresh;
   bool _followPosition = true;
+  bool _mapReady = false;
+  double _carMiles = defaultViewMiles; // car zoom button cycles this // flutter_map has laid out with a real size (never true while headless on the car)
 
   static const _refreshEvery = Duration(minutes: 2); // LibreWXR frames are 10 min apart; index is a tiny JSON
   static const _roadsEvery = Duration(minutes: 30);
@@ -112,6 +115,9 @@ class _MapScreenState extends State<MapScreen> {
             _zoomBy((call.arguments as num).toDouble());
           case 'recenter':
             _fitRadius();
+          case 'zoomCycle':
+            _followPosition = true;
+            _fitMiles(nextCarViewMiles(_carMiles));
           case 'panMode':
             if (call.arguments == false && _settings.centerOnZoom) _fitRadius();
           case 'pan':
@@ -121,8 +127,21 @@ class _MapScreenState extends State<MapScreen> {
             final centerPx = cam.latLngToScreenOffset(cam.center);
             _followPosition = false;
             _map.move(cam.screenOffsetToLatLng(centerPx + Offset(d[0].toDouble(), d[1].toDouble())), cam.zoom);
+            _carRecenterLater();
           case 'scale':
             _map.move(_map.camera.center, _map.camera.zoom + math.log((call.arguments as num).toDouble()) / math.ln2);
+            _carRecenterLater();
+          case 'tap':
+            final xy = (call.arguments as List).cast<num>();
+            final hits = alertsAt(_map.camera.screenOffsetToLatLng(Offset(xy[0].toDouble(), xy[1].toDouble())), _alerts);
+            debugPrint('orcweather car tap at $xy: ${hits.length} alert(s)');
+            if (hits.isNotEmpty) {
+              // Every alert under the finger, most urgent first, one breath each.
+              final text = hits
+                  .map((a) => spokenAlert(a, until: TimeOfDay.fromDateTime(a.expires.toLocal()).format(context)))
+                  .join(' ');
+              carChannel.invokeMethod('speak', text);
+            }
         }
       });
     }
@@ -135,6 +154,7 @@ class _MapScreenState extends State<MapScreen> {
     _compassSub?.cancel();
     _attributionBanner?.cancel();
     _zoomBadgeTimer?.cancel();
+    _carRecenter?.cancel();
     _refresh?.cancel();
     _client.close();
     _settings.dispose();
@@ -200,18 +220,27 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  /// What the car's native pane shows beside the map.
+  /// No recenter button on the car (four strip slots: pan, speak, +, −): come home on our own.
+  void _carRecenterLater() {
+    _carRecenter?.cancel();
+    _carRecenter = Timer(const Duration(seconds: 15), () {
+      if (!mounted || _position == null) return;
+      _followPosition = true;
+      _map.move(_position!, _map.camera.zoom);
+    });
+  }
+
+  /// What the car card shows (one line) and what the megaphone says.
   void _pushCarConditions() {
     final c = _conditions;
-    final worst = worstAlert(_alerts);
     final bad = _roads.where((r) => !r.isClear).length;
     final risk = roadRisk(c, _alerts);
+    final roads = bad > 0 ? '$bad road section${bad == 1 ? '' : 's'} with snow or ice' : (risk == null ? null : 'roads: $risk (estimate)');
+    final temp = c == null ? null : _settings.formatTemp(c.temperatureF);
+    final wind = c == null ? null : '${c.windDirection} ${c.windSpeed}';
     carChannel.invokeMethod('conditions', {
-      'temp': c == null ? null : _settings.formatTemp(c.temperatureF),
-      'sky': c?.shortForecast,
-      'wind': c == null ? null : '${c.windDirection} ${c.windSpeed}',
-      'alert': worst == null ? null : '${_alerts.length} alert${_alerts.length == 1 ? '' : 's'}: ${worst.event}',
-      'roads': bad > 0 ? '$bad road section${bad == 1 ? '' : 's'} with snow/ice (IDOT)' : (risk == null ? null : 'Roads: $risk (estimate)'),
+      'strip': stripLine(temp: temp, sky: c?.shortForecast, wind: wind, alerts: _alerts.length, badRoads: bad, roadRisk: risk, workZones: _workZones.length),
+      'spoken': spokenConditions(temp: temp, sky: c?.shortForecast, wind: wind, alerts: _alerts, roads: roads),
     });
   }
 
@@ -226,10 +255,16 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   /// Zoom so [defaultViewMiles] around the position fills the short side of the screen.
-  void _fitRadius() {
+  void _fitRadius() => _fitMiles(defaultViewMiles);
+
+  void _fitMiles(double miles) {
     final here = _position;
-    if (here == null) return;
-    _map.fitCamera(CameraFit.bounds(bounds: fitBounds(here, defaultViewMiles * metersPerMile), padding: const EdgeInsets.all(16)));
+    if (here == null || !_mapReady) return;
+    final size = _map.camera.nonRotatedSize;
+    if (size.shortestSide < 1) return; // headless (car engine before its surface): zoom would come out as 0
+    _carMiles = miles;
+    _map.fitCamera(CameraFit.bounds(bounds: fitBounds(here, miles * metersPerMile), padding: const EdgeInsets.all(16)));
+    debugPrint('orcweather fit: $miles mi, size ${size.width.round()}x${size.height.round()}, zoom ${_map.camera.zoom.toStringAsFixed(2)}');
     _followPosition = true;
     _flashZoom();
   }
@@ -239,6 +274,12 @@ class _MapScreenState extends State<MapScreen> {
   /// drag → stop following; the zoom changed → a pinch → snap back to the car (and follow again) once
   /// any fling is over.
   void _onMapEvent(MapEvent e) {
+    if (e is MapEventNonRotatedSizeChange && e.oldCamera.nonRotatedSize.shortestSide < 1 && e.camera.nonRotatedSize.shortestSide >= 1) {
+      // The car surface just gave the headless map its first real size. This event fires during
+      // layout; moving the camera inside it corrupts the camera, so fit on the next turn.
+      Future<void>(() { if (mounted) _fitRadius(); });
+      return;
+    }
     if (e is MapEventMoveStart && e.source != MapEventSource.mapController) {
       _zoomAtGestureStart = e.camera.zoom;
       _centerAtGestureStart = e.camera.center;
@@ -328,6 +369,10 @@ class _MapScreenState extends State<MapScreen> {
                     ? InteractiveFlag.none
                     : InteractiveFlag.all & ~InteractiveFlag.rotate & ~InteractiveFlag.doubleTapZoom & ~InteractiveFlag.doubleTapDragZoom,
               ),
+              onMapReady: () {
+                _mapReady = true;
+                _fitRadius(); // the first fix may have arrived before the map had a size (car: headless engine)
+              },
               onPositionChanged: (camera, hasGesture) {
                 if (hasGesture && (camera.zoom - _lastGestureZoom).abs() > 0.05) {
                   _lastGestureZoom = camera.zoom;

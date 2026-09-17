@@ -239,3 +239,20 @@ left before it could pass Google's car review or be used daily:
   sources on.
 - Alerts on the car: tapping polygons is phone-only; a car-safe equivalent is a row per alert
   in the pane (max five annotation types on the map, WE-5).
+
+**Update 2026-09-16 (late):** the car UI is now: acknowledgements pane for 5 s → full-screen map
+with a text-only card carrying the phone strip in glyphs (`71°F ⛈ · ENE 5 · ⚠ 2 · 💧`), strip =
+pan (required, hidden on touch units) · media ▶/■ (media key, BACKLOG #7's Android half) · 🔊 ·
+zoom-cycle 30/60/120 mi; auto-recenter 15 s after the last gesture; tapping alert polygons
+speaks every alert under the finger (NWS "WHAT" bullet as prose); 🔊 speaks conditions + all
+alert names. Verified in the phone log: taps hit, TTS synthesises, audio focus granted as
+navigation guidance. **Not yet heard**: the DHU on this machine plays no audio from anything
+(not just us; `~/.asoundrc` → pulse didn't help), so speech is to be confirmed in the real car.
+Engine is session-lifetime and headless until the map surface attaches; a fit before the map
+has a size zooms to the whole world — fixed by fitting on the zero→real size change, deferred
+out of layout (mid-layout fitCamera corrupts the camera). Icons are sent as bitmaps because the
+host caches the app's resource table across dev reinstalls. Remaining from the list above:
+host allowlist, engine sharing with the phone, gesture tuning, night-mode verification, Play
+review; plus: the grey stub at the end of the message card is host layout (not removable),
+CarIconSpan is unsupported in card text (glyphs are the ceiling).
+

@@ -73,3 +73,93 @@ LatLngBounds fitBounds(LatLng center, double radiusMeters) {
     LatLng(d.offset(center, radiusMeters, 180).latitude, d.offset(center, radiusMeters, 90).longitude),
   );
 }
+
+/// Ray-casting point-in-ring test (ring may or may not repeat its first point at the end).
+bool pointInRing(LatLng p, List<LatLng> ring) {
+  var inside = false;
+  for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    final a = ring[i], b = ring[j];
+    final crosses = (a.latitude > p.latitude) != (b.latitude > p.latitude) &&
+        p.longitude < (b.longitude - a.longitude) * (p.latitude - a.latitude) / (b.latitude - a.latitude) + a.longitude;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+/// Alerts whose polygons contain [p], most urgent first.
+List<WeatherAlert> alertsAt(LatLng p, List<WeatherAlert> alerts) =>
+    alerts.where((a) => a.polygons.any((ring) => pointInRing(p, ring))).toList()
+      ..sort((a, b) => hazardPriority(a.event).compareTo(hazardPriority(b.event)));
+
+/// Unicode stand-in for the phone strip's icon: car templates ignore icon spans in text.
+String skyGlyph(String forecast) => switch (skyIcon(forecast)) {
+      Icons.thunderstorm => '⛈',
+      Icons.ac_unit => '❄',
+      Icons.water_drop => '🌧',
+      Icons.foggy => '🌫',
+      Icons.cloud => '☁',
+      _ => '☀',
+    };
+
+/// Glyph for an estimated road risk (see roadRisk()): ice, snow, flooding, fog, wet.
+String roadRiskGlyph(String risk) {
+  final r = risk.toLowerCase();
+  if (r.startsWith('ice')) return '🧊';
+  if (r.startsWith('snow')) return '❄';
+  if (r.startsWith('flood')) return '🌊';
+  if (r.startsWith('low visibility')) return '🌫';
+  return '💧';
+}
+
+/// One line for the car card, the phone strip in glyphs: "71°F ⛈ · ENE 5 · ⚠ 2 · ❄ 1 · 🚧 3".
+/// Reported snow/ice sections count as "❄ N"; an estimated risk shows its own glyph alone.
+String stripLine({required String? temp, required String? sky, required String? wind, int alerts = 0, int badRoads = 0, String? roadRisk, int workZones = 0}) {
+  if (temp == null) return 'Locating…';
+  return [
+    '$temp${sky == null ? '' : ' ${skyGlyph(sky)}'}',
+    if (wind != null) wind.replaceAll(' mph', ''),
+    if (alerts > 0) '⚠ $alerts',
+    if (badRoads > 0) '❄ $badRoads' else if (roadRisk != null) roadRiskGlyph(roadRisk),
+    if (workZones > 0) '🚧 $workZones',
+  ].join(' · ');
+}
+
+/// Car zoom button: one press steps the view out, wrapping back to the closest.
+const carViewMiles = [30.0, 60.0, 120.0];
+double nextCarViewMiles(double current) {
+  final i = carViewMiles.indexWhere((m) => (m - current).abs() < 0.5);
+  return carViewMiles[(i + 1) % carViewMiles.length];
+}
+
+/// What the megaphone says. Units spelled out; "mph" reads badly aloud.
+String spokenConditions({required String? temp, required String? sky, required String? wind, required List<WeatherAlert> alerts, String? roads}) {
+  if (temp == null) return 'Still locating you.';
+  final parts = <String>[
+    temp.replaceAll('°F', ' degrees').replaceAll('°C', ' degrees celsius'),
+    ?sky,
+    if (wind != null) 'wind ${_spokenWind(wind)}',
+  ];
+  if (alerts.isNotEmpty) {
+    final sorted = [...alerts]..sort((a, b) => hazardPriority(a.event).compareTo(hazardPriority(b.event)));
+    final names = sorted.map((a) => a.event).toSet().join(', ');
+    parts.add(alerts.length == 1 ? 'one alert: $names' : '${alerts.length} alerts: $names');
+  }
+  if (roads != null) parts.add(roads.replaceFirst('(estimate)', 'estimated'));
+  return '${parts.join('. ')}.';
+}
+
+String _spokenWind(String wind) => wind
+    .replaceAll(RegExp(r'\bN\b'), 'north').replaceAll(RegExp(r'\bS\b'), 'south')
+    .replaceAll(RegExp(r'\bE\b'), 'east').replaceAll(RegExp(r'\bW\b'), 'west')
+    .replaceAll(RegExp(r'\bNE\b'), 'northeast').replaceAll(RegExp(r'\bNW\b'), 'northwest')
+    .replaceAll(RegExp(r'\bSE\b'), 'southeast').replaceAll(RegExp(r'\bSW\b'), 'southwest')
+    .replaceAll(' mph', ' miles per hour');
+
+/// What a tap on an alert says: event, expiry, then the NWS "WHAT" bullet (or the first sentence).
+/// NWS text is bulleted "* WHAT...", "* WHERE...", "* WHEN...", "* IMPACTS..."; read the WHAT line as prose.
+String spokenAlert(WeatherAlert a, {required String until}) {
+  final brief = briefDescription(a.description);
+  final what = RegExp(r'\*\s*WHAT\.{2,}\s*(.+?)(?=\s\*\s*[A-Z]{3,}\.{2,}|$)').firstMatch(brief)?.group(1);
+  final body = (what ?? brief.split(RegExp(r'(?<=[.!?])\s')).first).replaceAll(RegExp(r'^\*\s*'), '');
+  return '${a.event}, until $until. ${body.trim()}';
+}
