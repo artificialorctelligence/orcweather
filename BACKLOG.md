@@ -253,6 +253,6 @@ has a size zooms to the whole world — fixed by fitting on the zero→real size
 out of layout (mid-layout fitCamera corrupts the camera). Icons are sent as bitmaps because the
 host caches the app's resource table across dev reinstalls. Remaining from the list above:
 host allowlist, engine sharing with the phone, gesture tuning, night-mode verification, Play
-review; plus: the grey stub at the end of the message card is host layout (not removable),
+review; plus: the grey stub at the end of the message card is the host's minimum card width (tested 2026-09-17: setIcon adds an icon above the text, stub unchanged),
 CarIconSpan is unsupported in card text (glyphs are the ceiling).
 
