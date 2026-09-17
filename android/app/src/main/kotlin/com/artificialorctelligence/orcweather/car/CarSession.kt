@@ -16,9 +16,8 @@ class CarSession : Session() {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) = bridge.destroy()
         })
-        // The map is home; the acknowledgements card sits on top for five seconds, then pops.
-        carContext.getCarService(ScreenManager::class.java).push(MapCarScreen(carContext, bridge))
-        return SourcesScreen(carContext, autoDismiss = true)
+        // Straight to the map; licence attribution is drawn on the map surface (5 s, then an (i) chip).
+        return MapCarScreen(carContext, bridge)
     }
 
     // MR-1: light/dark follows the host. The Flutter map reads the Presentation's uiMode.
